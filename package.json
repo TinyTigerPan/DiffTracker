@@ -230,11 +230,6 @@
           "command": "diffTracker.clearDiffs",
           "when": "view == diffTracker.changesView",
           "group": "navigation"
-        },
-        {
-          "command": "diffTracker.editWatchExcludes",
-          "when": "view == diffTracker.settingsView",
-          "group": "navigation"
         }
       ],
       "editor/title": [
@@ -266,7 +261,6 @@
     "package": "vsce package"
   },
   "devDependencies": {
-    "@types/diff": "^7.0.2",
     "@types/node": "^20.x",
     "@types/vscode": "^1.80.0",
     "@typescript-eslint/eslint-plugin": "^6.x",
@@ -278,7 +272,7 @@
   },
   "dependencies": {
     "@pierre/diffs": "^1.0.10",
-    "diff": "^5.2.2",
+    "diff": "^8.0.3",
     "ignore": "^5.3.2"
   }
 }
