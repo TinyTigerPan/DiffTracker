@@ -113,6 +113,18 @@ export class WatchExcludePanel {
             color: var(--vscode-descriptionForeground);
             font-size: 12px;
         }
+        .test-hint {
+            margin: 12px 0 6px 0;
+        }
+        ul {
+            margin: 0 0 12px 16px;
+            padding: 0;
+            color: var(--vscode-descriptionForeground);
+            font-size: 12px;
+        }
+        li {
+            margin: 2px 0;
+        }
         textarea {
             width: 100%;
             min-height: 240px;
@@ -165,12 +177,19 @@ export class WatchExcludePanel {
 </head>
 <body>
     <h1>Watch ignore patterns</h1>
-    <p>One pattern per line. Gitignore-style patterns are supported.</p>
+    <p>Rules are applied in this order:</p>
+    <ul>
+        <li>.gitignore files (including nested ones)</li>
+        <li>Built-in defaults (.git, node_modules, out, dist, build, coverage)</li>
+        <li>VS Code excludes (files.watcherExclude / search.exclude / files.exclude)</li>
+        <li>Patterns below (one per line, gitignore-style)</li>
+    </ul>
     <textarea id="patterns" spellcheck="false"></textarea>
     <div class="actions">
         <button id="save">Save</button>
         <button id="reload" class="secondary">Reload</button>
     </div>
+    <p class="test-hint">Test a path against the current saved rules.</p>
     <div class="test">
         <input id="test-path" type="text" placeholder="Test path, e.g. src/app.ts" />
         <button id="test-btn" class="secondary">Test</button>

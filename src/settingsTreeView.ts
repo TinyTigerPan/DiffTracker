@@ -37,6 +37,18 @@ class SettingGroupItem extends vscode.TreeItem {
     }
 }
 
+/**
+ * Tree item for an action entry
+ */
+class SettingActionItem extends vscode.TreeItem {
+    constructor(public readonly label: string, command: vscode.Command, iconId: string) {
+        super(label, vscode.TreeItemCollapsibleState.None);
+        this.iconPath = new vscode.ThemeIcon(iconId);
+        this.command = command;
+        this.contextValue = 'settingAction';
+    }
+}
+
 type SettingGroup = {
     id: string;
     label: string;
@@ -68,6 +80,11 @@ export class SettingsTreeDataProvider implements vscode.TreeDataProvider<Setting
                 { key: 'highlightModifiedLines', label: 'Modified lines' },
                 { key: 'highlightWordChanges', label: 'Word changes' }
             ]
+        },
+        {
+            id: 'tools',
+            label: 'Tools',
+            items: []
         }
     ];
 
@@ -84,11 +101,11 @@ export class SettingsTreeDataProvider implements vscode.TreeDataProvider<Setting
         this._onDidChangeTreeData.fire(undefined);
     }
 
-    getTreeItem(element: SettingItem | SettingGroupItem): vscode.TreeItem {
+    getTreeItem(element: SettingItem | SettingGroupItem | SettingActionItem): vscode.TreeItem {
         return element;
     }
 
-    getChildren(element?: SettingGroupItem): Array<SettingGroupItem | SettingItem> {
+    getChildren(element?: SettingGroupItem): Array<SettingGroupItem | SettingItem | SettingActionItem> {
         const config = vscode.workspace.getConfiguration('diffTracker');
 
         if (!element) {
@@ -98,6 +115,19 @@ export class SettingsTreeDataProvider implements vscode.TreeDataProvider<Setting
         const group = this.settings.find(g => g.label === element.label);
         if (!group) {
             return [];
+        }
+
+        if (group.id === 'tools') {
+            return [
+                new SettingActionItem(
+                    'Edit Watch Ignores',
+                    {
+                        command: 'diffTracker.editWatchExcludes',
+                        title: 'Edit Watch Ignores'
+                    },
+                    'filter'
+                )
+            ];
         }
 
         return group.items.map(setting => {
