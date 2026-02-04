@@ -46,14 +46,17 @@ export class DiffTracker {
     private ignoreMatchers = new Map<string, Ignore>();
     private externalWatcherEnabled = false;
     private snapshotInitialized = false;
+    private baselineBuilding = false;
     private pendingExternalChanges = new Set<string>();
     private externalChangeTimers = new Map<string, NodeJS.Timeout>();
     private documentChangeTimers = new Map<string, NodeJS.Timeout>();
     private readonly _onDidChangeRecordingState = new vscode.EventEmitter<boolean>();
     private readonly _onDidTrackChanges = new vscode.EventEmitter<void>();
+    private readonly _onDidChangeBaselineState = new vscode.EventEmitter<'idle' | 'building' | 'ready'>();
 
     public readonly onDidChangeRecordingState = this._onDidChangeRecordingState.event;
     public readonly onDidTrackChanges = this._onDidTrackChanges.event;
+    public readonly onDidChangeBaselineState = this._onDidChangeBaselineState.event;
 
     constructor() {
         this.disposables.push(
@@ -84,6 +87,8 @@ export class DiffTracker {
         this.inlineViews.clear();
         this.pendingExternalChanges.clear();
         this.snapshotInitialized = false;
+        this.baselineBuilding = true;
+        this._onDidChangeBaselineState.fire('building');
 
         vscode.workspace.textDocuments.forEach(doc => {
             if (doc.uri.scheme === 'file') {
@@ -99,6 +104,8 @@ export class DiffTracker {
 
     public stopRecording() {
         this.isRecording = false;
+        this.baselineBuilding = false;
+        this._onDidChangeBaselineState.fire('idle');
         this.clearExternalChangeTimers();
         this.clearDocumentChangeTimers();
         this.disposeFileWatchers();
@@ -382,6 +389,8 @@ export class DiffTracker {
         const folders = vscode.workspace.workspaceFolders;
         if (!folders || folders.length === 0) {
             this.snapshotInitialized = true;
+            this.baselineBuilding = false;
+            this._onDidChangeBaselineState.fire('ready');
             return;
         }
 
@@ -436,6 +445,10 @@ export class DiffTracker {
         }
 
         this.snapshotInitialized = true;
+        if (this.isRecording && this.baselineBuilding) {
+            this.baselineBuilding = false;
+            this._onDidChangeBaselineState.fire('ready');
+        }
         this.processPendingExternalChanges();
     }
 
