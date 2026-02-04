@@ -1,8 +1,16 @@
 # Diff Tracker
 
+[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code%20Marketplace-Diff%20Tracker-007ACC?logo=visualstudiocode&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=Wizyoung.diff-tracker)
+[![Open VSX](https://img.shields.io/badge/Open%20VSX-Diff%20Tracker-5E60E7?logo=opensourceinitiative&logoColor=white)](https://open-vsx.org/extension/Wizyoung/diff-tracker)
+
 Diff Tracker is a VS Code extension that records file changes and shows a Git-like inline diff directly in the editor.
 
 ## Screenshots
+
+💥 **New in 0.4.0. Cursor like floating accept/reject buttons!**
+| Cursor like WebView Unified | Cursor like WebView Split |
+|:---------------:|:--------------:|
+| ![Word diff](./resources/webview1.png) | ![Settings](./resources/webview2.png) |
 
 |               Editor Inline View                |    Editor Inline View (hover effect)    |
 | :---------------------------------------------: | :-------------------------------------: |
@@ -116,6 +124,14 @@ None at this time. Please open an issue if you find a bug.
 ### 0.3.3
 - Add word-level diff highlighting for modified lines
 - Add "Highlight Word Changes" setting to toggle word-level highlighting
+
+### 0.4.0
+- Cursor-like WebView diff: floating Undo/Keep, unified view default, wrap/expand, and Keep All/Reject All in the toolbar
+- Offline WebView rendering (bundled @pierre/diffs)
+- Workspace-wide file watching (no longer limited to open files)
+- New Watch Ignore panel with `.gitignore` support + `dir:` rules for faster watcher excludes
+- Faster tracking in large workspaces (debounced changes + optimized watchers)
+- Smoother recording start on big repos (baseline builds in batches, large files skipped)
 
 ## License
 
