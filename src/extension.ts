@@ -19,6 +19,7 @@ let originalContentProvider: OriginalContentProvider;
 let inlineContentProvider: InlineContentProvider;
 let codeLensProvider: DiffCodeLensProvider;
 let settingsTreeDataProvider: SettingsTreeDataProvider;
+let changesTreeView: vscode.TreeView<any> | undefined;
 
 type DefaultOpenMode = 'webview' | 'inline' | 'sideBySide' | 'original' | 'splitOriginalWebview';
 
@@ -50,14 +51,34 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Register tree view provider for activity bar
     const treeDataProvider = new DiffTreeDataProvider(diffTracker);
-    context.subscriptions.push(
-        vscode.window.registerTreeDataProvider('diffTracker.changesView', treeDataProvider)
-    );
+    changesTreeView = vscode.window.createTreeView('diffTracker.changesView', {
+        treeDataProvider,
+        showCollapseAll: false
+    });
+    context.subscriptions.push(changesTreeView);
 
     // Register settings tree view
     context.subscriptions.push(
         vscode.window.registerTreeDataProvider('diffTracker.settingsView', settingsTreeDataProvider)
     );
+
+    const refreshChangesTree = () => {
+        treeDataProvider.refresh();
+
+        if (!changesTreeView) {
+            return;
+        }
+
+        const count = diffTracker.getTrackedChanges().length;
+        if (count > 0) {
+            changesTreeView.badge = {
+                value: count,
+                tooltip: `${count} changed file(s)`
+            };
+        } else {
+            changesTreeView.badge = undefined;
+        }
+    };
 
     // Register toggle setting command
     context.subscriptions.push(
@@ -96,12 +117,12 @@ export function activate(context: vscode.ExtensionContext) {
             if (diffTracker.getIsRecording()) {
                 diffTracker.stopRecording();
                 vscode.commands.executeCommand('setContext', 'diffTracker.isRecording', false);
-                treeDataProvider.refresh();
+                refreshChangesTree();
                 decorationManager.clearAllDecorations();
             } else {
                 diffTracker.startRecording();
                 vscode.commands.executeCommand('setContext', 'diffTracker.isRecording', true);
-                treeDataProvider.refresh();
+                refreshChangesTree();
 
                 // Update decorations for current editor
                 if (vscode.window.activeTextEditor) {
@@ -115,7 +136,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('diffTracker.startRecording', () => {
             diffTracker.startRecording();
             vscode.commands.executeCommand('setContext', 'diffTracker.isRecording', true);
-            treeDataProvider.refresh();
+            refreshChangesTree();
 
             // Update decorations for current editor
             if (vscode.window.activeTextEditor) {
@@ -128,7 +149,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('diffTracker.stopRecording', () => {
             diffTracker.stopRecording();
             vscode.commands.executeCommand('setContext', 'diffTracker.isRecording', false);
-            treeDataProvider.refresh();
+            refreshChangesTree();
             decorationManager.clearAllDecorations();
         })
     );
@@ -208,7 +229,7 @@ export function activate(context: vscode.ExtensionContext) {
 
             if (answer === 'Revert All') {
                 const revertedCount = await diffTracker.revertAllChanges();
-                treeDataProvider.refresh();
+                refreshChangesTree();
                 decorationManager.clearAllDecorations();
                 vscode.window.showInformationMessage(`Reverted ${revertedCount} file(s)`);
             }
@@ -238,7 +259,7 @@ export function activate(context: vscode.ExtensionContext) {
 
             const success = await diffTracker.revertFile(filePath);
             if (success) {
-                treeDataProvider.refresh();
+                refreshChangesTree();
                 decorationManager.clearAllDecorations();
                 vscode.window.showInformationMessage('File reverted to original content');
             }
@@ -291,7 +312,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('diffTracker.clearDiffs', () => {
             diffTracker.clearDiffs();
-            treeDataProvider.refresh();
+            refreshChangesTree();
             decorationManager.clearAllDecorations();
             vscode.window.showInformationMessage('Diff Tracker: All diffs cleared');
         })
@@ -303,7 +324,7 @@ export function activate(context: vscode.ExtensionContext) {
             const success = await diffTracker.revertBlock(filePath, blockRef);
             if (success) {
                 codeLensProvider.refresh();
-                treeDataProvider.refresh();
+                refreshChangesTree();
             }
             return success;
         })
@@ -315,7 +336,7 @@ export function activate(context: vscode.ExtensionContext) {
             const success = await diffTracker.keepBlock(filePath, blockRef);
             if (success) {
                 codeLensProvider.refresh();
-                treeDataProvider.refresh();
+                refreshChangesTree();
             }
             return success;
         })
@@ -358,7 +379,7 @@ export function activate(context: vscode.ExtensionContext) {
             const success = await diffTracker.revertFile(filePath);
             if (success) {
                 codeLensProvider.refresh();
-                treeDataProvider.refresh();
+                refreshChangesTree();
             }
             return success;
         })
@@ -370,7 +391,7 @@ export function activate(context: vscode.ExtensionContext) {
             const success = await diffTracker.keepAllChangesInFile(filePath);
             if (success) {
                 codeLensProvider.refresh();
-                treeDataProvider.refresh();
+                refreshChangesTree();
             }
             return success;
         })
@@ -488,15 +509,17 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Update decorations when recording state changes
     diffTracker.onDidChangeRecordingState(() => {
-        treeDataProvider.refresh();
+        refreshChangesTree();
         updateVisibleDecorations();
     });
 
     // Update decorations when changes are tracked
     diffTracker.onDidTrackChanges(() => {
-        treeDataProvider.refresh();
+        refreshChangesTree();
         updateVisibleDecorations();
     });
+
+    refreshChangesTree();
 
     // Register disposables
     context.subscriptions.push(statusBarManager);
