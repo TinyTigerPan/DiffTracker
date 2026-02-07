@@ -60,6 +60,8 @@ export class DiffTracker {
     private trackedChangesCacheVersion = -1;
     private trackedChangesCache: FileDiff[] = [];
     private lineChanges = new Map<string, LineChange[]>();
+    private lineChangesVersionByFile = new Map<string, number>();
+    private changeBlocksCache = new Map<string, { version: number; blocks: ChangeBlock[] }>();
     private inlineViews = new Map<string, InlineDiffView>();
     private disposables: vscode.Disposable[] = [];
     private fileWatchers: vscode.FileSystemWatcher[] = [];
@@ -107,6 +109,7 @@ export class DiffTracker {
         this.fileSnapshots.clear();
         this.clearTrackedChanges();
         this.lineChanges.clear();
+        this.resetChangeBlocksCaches();
         this.inlineViews.clear();
         this.pendingExternalChanges.clear();
         this.snapshotInitialized = false;
@@ -132,12 +135,14 @@ export class DiffTracker {
         this.clearExternalChangeTimers();
         this.clearDocumentChangeTimers();
         this.disposeFileWatchers();
+        this.resetChangeBlocksCaches();
         this._onDidChangeRecordingState.fire(false);
     }
 
     public clearDiffs() {
         this.clearTrackedChanges();
         this.lineChanges.clear();
+        this.resetChangeBlocksCaches();
         this.inlineViews.clear();
         this._onDidTrackChanges.fire();
     }
@@ -154,6 +159,7 @@ export class DiffTracker {
         this.fileSnapshots.clear();
         this.clearTrackedChanges();
         this.lineChanges.clear();
+        this.resetChangeBlocksCaches();
         this.inlineViews.clear();
         this.pendingExternalChanges.clear();
         this.snapshotInitialized = false;
@@ -476,6 +482,7 @@ export class DiffTracker {
             if (this.isPathIgnored(uri)) {
                 this.deleteTrackedChange(filePath);
                 this.lineChanges.delete(filePath);
+                this.markLineChangesUpdated(filePath);
                 this.inlineViews.delete(filePath);
                 changed = true;
             }
@@ -724,6 +731,7 @@ export class DiffTracker {
         if (sameLogicalLines) {
             this.deleteTrackedChange(filePath);
             this.lineChanges.delete(filePath);
+            this.markLineChangesUpdated(filePath);
             this.inlineViews.delete(filePath);
             this._onDidTrackChanges.fire();
             return;
@@ -788,6 +796,7 @@ export class DiffTracker {
 
         this.clearTrackedChanges();
         this.lineChanges.clear();
+        this.resetChangeBlocksCaches();
         this.inlineViews.clear();
         this._onDidTrackChanges.fire();
         return acceptedCount;
@@ -806,6 +815,7 @@ export class DiffTracker {
 
         this.deleteTrackedChange(filePath);
         this.lineChanges.delete(filePath);
+        this.markLineChangesUpdated(filePath);
         this.inlineViews.delete(filePath);
         this._onDidTrackChanges.fire();
 
@@ -1052,6 +1062,7 @@ export class DiffTracker {
         // Clear tracked changes for this file
         this.deleteTrackedChange(filePath);
         this.lineChanges.delete(filePath);
+        this.markLineChangesUpdated(filePath);
         this.inlineViews.delete(filePath);
 
         this._onDidTrackChanges.fire();
@@ -1062,8 +1073,16 @@ export class DiffTracker {
      * Get change blocks for a file (used by CodeLens)
      */
     public getChangeBlocks(filePath: string): ChangeBlock[] {
+        const currentVersion = this.lineChangesVersionByFile.get(filePath) ?? 0;
+        const cached = this.changeBlocksCache.get(filePath);
+        if (cached && cached.version === currentVersion) {
+            return cached.blocks.slice();
+        }
+
         const lineChanges = this.lineChanges.get(filePath);
         if (!lineChanges || lineChanges.length === 0) {
+            const emptyBlocks: ChangeBlock[] = [];
+            this.changeBlocksCache.set(filePath, { version: currentVersion, blocks: emptyBlocks });
             return [];
         }
 
@@ -1072,6 +1091,8 @@ export class DiffTracker {
             .filter(c => c.type !== 'unchanged');
 
         if (changes.length === 0) {
+            const emptyBlocks: ChangeBlock[] = [];
+            this.changeBlocksCache.set(filePath, { version: currentVersion, blocks: emptyBlocks });
             return [];
         }
 
@@ -1110,7 +1131,7 @@ export class DiffTracker {
 
         const coalescedGroups = this.coalesceChangeGroups(groupedChanges);
         const idCounter = new Map<string, number>();
-        return coalescedGroups.map((group, index) => {
+        const blocks = coalescedGroups.map((group, index) => {
             const startLine = Math.min(...group.map(change => change.lineNumber));
             const endLine = Math.max(...group.map(change => change.lineNumber));
 
@@ -1147,6 +1168,8 @@ export class DiffTracker {
                 blockIndex: index
             };
         });
+        this.changeBlocksCache.set(filePath, { version: currentVersion, blocks });
+        return blocks.slice();
     }
 
     private coalesceChangeGroups(groups: LineChange[][]): LineChange[][] {
@@ -1360,6 +1383,7 @@ export class DiffTracker {
         }
 
         this.lineChanges.set(filePath, view.lineChanges);
+        this.markLineChangesUpdated(filePath);
         this.inlineViews.set(filePath, view.inlineView);
         return view.inlineView;
     }
@@ -1378,11 +1402,13 @@ export class DiffTracker {
         const view = this.buildDiffView(filePath);
         if (!view) {
             this.lineChanges.delete(filePath);
+            this.markLineChangesUpdated(filePath);
             this.inlineViews.delete(filePath);
             return;
         }
 
         this.lineChanges.set(filePath, view.lineChanges);
+        this.markLineChangesUpdated(filePath);
         this.inlineViews.set(filePath, view.inlineView);
     }
 
@@ -2209,6 +2235,27 @@ export class DiffTracker {
 
     private markTrackedChangesDirty(): void {
         this.trackedChangesVersion++;
+    }
+
+    private bumpLineChangesVersion(filePath: string): number {
+        const current = this.lineChangesVersionByFile.get(filePath) ?? 0;
+        const next = current + 1;
+        this.lineChangesVersionByFile.set(filePath, next);
+        return next;
+    }
+
+    private invalidateChangeBlocksCache(filePath: string): void {
+        this.changeBlocksCache.delete(filePath);
+    }
+
+    private resetChangeBlocksCaches(): void {
+        this.changeBlocksCache.clear();
+        this.lineChangesVersionByFile.clear();
+    }
+
+    private markLineChangesUpdated(filePath: string): void {
+        this.bumpLineChangesVersion(filePath);
+        this.invalidateChangeBlocksCache(filePath);
     }
 
     private setIgnoreResultCache(cacheKey: string, ignored: boolean): void {
