@@ -254,39 +254,6 @@ export class WebviewDiffPanel {
         });
     }
 
-    private findBlockIndex(filePath: string, blockIndex?: number, lineNumber?: number): number | undefined {
-        // If blockIndex is directly provided, use it
-        if (blockIndex !== undefined) {
-            return blockIndex;
-        }
-
-        // Otherwise, find block by line number
-        if (lineNumber !== undefined) {
-            const blocks = this.diffTracker.getChangeBlocks(filePath);
-            for (let i = 0; i < blocks.length; i++) {
-                const block = blocks[i];
-                if (lineNumber >= block.startLine && lineNumber <= block.endLine) {
-                    return i;
-                }
-            }
-            // If not found in range, find the closest block
-            let closestIndex = 0;
-            let closestDistance = Infinity;
-            for (let i = 0; i < blocks.length; i++) {
-                const block = blocks[i];
-                const midPoint = (block.startLine + block.endLine) / 2;
-                const distance = Math.abs(lineNumber - midPoint);
-                if (distance < closestDistance) {
-                    closestDistance = distance;
-                    closestIndex = i;
-                }
-            }
-            return blocks.length > 0 ? closestIndex : undefined;
-        }
-
-        return undefined;
-    }
-
     private updateTheme(): void {
         const themeKind = vscode.window.activeColorTheme.kind;
         const themeType = themeKind === vscode.ColorThemeKind.Light ? 'light' : 'dark';
