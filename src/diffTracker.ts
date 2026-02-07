@@ -871,7 +871,13 @@ export class DiffTracker {
             edit.replace(uri, fullRange, nextText);
 
             const success = await vscode.workspace.applyEdit(edit);
-            return success;
+            if (!success) {
+                return false;
+            }
+
+            // Refresh immediately so WebView/CodeLens state does not wait for debounced document-change events.
+            this.updateTrackedDiff(filePath, nextText);
+            return true;
         } catch (error) {
             console.error(`Failed to revert block in ${filePath}:`, error);
             return false;
@@ -1056,8 +1062,9 @@ export class DiffTracker {
             groupedChanges.push(currentGroup);
         }
 
+        const coalescedGroups = this.coalesceChangeGroups(groupedChanges);
         const idCounter = new Map<string, number>();
-        return groupedChanges.map((group, index) => {
+        return coalescedGroups.map((group, index) => {
             const startLine = Math.min(...group.map(change => change.lineNumber));
             const endLine = Math.max(...group.map(change => change.lineNumber));
 
@@ -1075,7 +1082,12 @@ export class DiffTracker {
                 .sort((a, b) => a - b);
             const originalStart = originalLineNumbers.length > 0 ? originalLineNumbers[0] : 0;
             const originalEnd = originalLineNumbers.length > 0 ? originalLineNumbers[originalLineNumbers.length - 1] : 0;
-            const segmentKey = group.find(change => change.segmentId !== undefined)?.segmentId ?? 0;
+            const segmentIds = [...new Set(
+                group
+                    .map(change => change.segmentId)
+                    .filter((segmentId): segmentId is number => segmentId !== undefined)
+            )].sort((a, b) => a - b);
+            const segmentKey = segmentIds.length > 0 ? segmentIds.join(',') : '0';
             const key = `${type}:${startLine}:${endLine}:${originalStart}:${originalEnd}:${segmentKey}`;
             const seen = idCounter.get(key) ?? 0;
             idCounter.set(key, seen + 1);
@@ -1089,6 +1101,128 @@ export class DiffTracker {
                 blockIndex: index
             };
         });
+    }
+
+    private coalesceChangeGroups(groups: LineChange[][]): LineChange[][] {
+        if (groups.length <= 1) {
+            return groups;
+        }
+
+        const coalesced: LineChange[][] = [];
+        for (const group of groups) {
+            if (group.length === 0) {
+                continue;
+            }
+
+            if (coalesced.length === 0) {
+                coalesced.push([...group]);
+                continue;
+            }
+
+            const previous = coalesced[coalesced.length - 1];
+            if (this.isSameEditCluster(previous, group)) {
+                previous.push(...group);
+            } else {
+                coalesced.push([...group]);
+            }
+        }
+
+        return coalesced;
+    }
+
+    private isSameEditCluster(prevGroup: LineChange[], nextGroup: LineChange[]): boolean {
+        const prevSegments = new Set(
+            prevGroup
+                .map(change => change.segmentId)
+                .filter((segmentId): segmentId is number => segmentId !== undefined)
+        );
+        const nextSegments = new Set(
+            nextGroup
+                .map(change => change.segmentId)
+                .filter((segmentId): segmentId is number => segmentId !== undefined)
+        );
+
+        if (prevSegments.size > 0 && nextSegments.size > 0) {
+            for (const segmentId of prevSegments) {
+                if (nextSegments.has(segmentId)) {
+                    return true;
+                }
+            }
+        }
+
+        const prevCurrentRange = this.getLineRange(prevGroup.map(change => change.lineNumber));
+        const nextCurrentRange = this.getLineRange(nextGroup.map(change => change.lineNumber));
+        const currentRangesTouch = this.areRangesAdjacentOrOverlapping(prevCurrentRange, nextCurrentRange);
+
+        const combinedTypes = new Set<LineChange['type']>(
+            [...prevGroup, ...nextGroup]
+                .map(change => change.type)
+                .filter(type => type !== 'unchanged')
+        );
+
+        if (currentRangesTouch && combinedTypes.size >= 2) {
+            return true;
+        }
+
+        const oneSidePureBlankAdded = this.isPureBlankAddedGroup(prevGroup) || this.isPureBlankAddedGroup(nextGroup);
+        if (!oneSidePureBlankAdded) {
+            return false;
+        }
+
+        const otherGroup = this.isPureBlankAddedGroup(prevGroup) ? nextGroup : prevGroup;
+        const hasModifiedOrDeleted = otherGroup.some(change => change.type === 'modified' || change.type === 'deleted');
+        if (!hasModifiedOrDeleted) {
+            return false;
+        }
+
+        const prevOriginalRange = this.getLineRange(
+            prevGroup
+                .map(change => change.originalLineNumber)
+                .filter((line): line is number => line !== undefined)
+        );
+        const nextOriginalRange = this.getLineRange(
+            nextGroup
+                .map(change => change.originalLineNumber)
+                .filter((line): line is number => line !== undefined)
+        );
+        const originalRangesTouch = this.areRangesAdjacentOrOverlapping(prevOriginalRange, nextOriginalRange);
+
+        return currentRangesTouch || originalRangesTouch;
+    }
+
+    private isPureBlankAddedGroup(group: LineChange[]): boolean {
+        if (group.length === 0) {
+            return false;
+        }
+
+        return group.every(change => change.type === 'added' && (change.newText ?? '').trim().length === 0);
+    }
+
+    private getLineRange(lines: number[]): { start: number; end: number } | undefined {
+        if (lines.length === 0) {
+            return undefined;
+        }
+
+        const positiveLines = lines.filter(line => Number.isFinite(line) && line > 0);
+        if (positiveLines.length === 0) {
+            return undefined;
+        }
+
+        return {
+            start: Math.min(...positiveLines),
+            end: Math.max(...positiveLines)
+        };
+    }
+
+    private areRangesAdjacentOrOverlapping(
+        first: { start: number; end: number } | undefined,
+        second: { start: number; end: number } | undefined
+    ): boolean {
+        if (!first || !second) {
+            return false;
+        }
+
+        return second.start <= first.end + 1 && first.start <= second.end + 1;
     }
 
     private resolveBlock(filePath: string, blockRef: string | number): ChangeBlock | undefined {

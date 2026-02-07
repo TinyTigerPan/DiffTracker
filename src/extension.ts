@@ -305,6 +305,7 @@ export function activate(context: vscode.ExtensionContext) {
                 codeLensProvider.refresh();
                 treeDataProvider.refresh();
             }
+            return success;
         })
     );
 
@@ -316,6 +317,7 @@ export function activate(context: vscode.ExtensionContext) {
                 codeLensProvider.refresh();
                 treeDataProvider.refresh();
             }
+            return success;
         })
     );
 
@@ -358,6 +360,7 @@ export function activate(context: vscode.ExtensionContext) {
                 codeLensProvider.refresh();
                 treeDataProvider.refresh();
             }
+            return success;
         })
     );
 
@@ -369,6 +372,7 @@ export function activate(context: vscode.ExtensionContext) {
                 codeLensProvider.refresh();
                 treeDataProvider.refresh();
             }
+            return success;
         })
     );
 

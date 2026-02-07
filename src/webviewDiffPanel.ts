@@ -13,6 +13,20 @@ type WebviewChangeBlockPayload = {
     originalLineNumbers: number[];
 };
 
+type WebviewInboundMessage = {
+    command: string;
+    requestId?: string;
+    filePath?: string;
+    blockIndex?: number;
+    lineNumber?: number;
+    hunkIndex?: number;
+    changeBlockIndex?: number;
+    changeBlockId?: string;
+    style?: string;
+    wrap?: boolean;
+    expandAll?: boolean;
+};
+
 /**
  * Manages a WebviewPanel for displaying diffs using @pierre/diffs library
  */
@@ -151,38 +165,60 @@ export class WebviewDiffPanel {
         });
     }
 
-    private handleMessage(message: { command: string; filePath?: string; blockIndex?: number; lineNumber?: number; hunkIndex?: number; changeBlockIndex?: number; changeBlockId?: string; style?: string; wrap?: boolean; expandAll?: boolean }): void {
+    private async handleMessage(message: WebviewInboundMessage): Promise<void> {
         switch (message.command) {
             case 'revertBlock':
                 if (message.filePath && (message.changeBlockId !== undefined || message.changeBlockIndex !== undefined)) {
-                    // executeCommand is async; onDidTrackChanges will trigger update() when done
-                    vscode.commands.executeCommand(
-                        'diffTracker.revertBlock',
-                        message.filePath,
-                        message.changeBlockId ?? message.changeBlockIndex
-                    );
+                    try {
+                        const success = await vscode.commands.executeCommand<boolean>(
+                            'diffTracker.revertBlock',
+                            message.filePath,
+                            message.changeBlockId ?? message.changeBlockIndex
+                        );
+                        this.postActionAck(message.requestId, success !== false);
+                    } catch (error) {
+                        this.postActionAck(message.requestId, false, error);
+                    }
                 }
                 break;
             case 'keepBlock':
                 if (message.filePath && (message.changeBlockId !== undefined || message.changeBlockIndex !== undefined)) {
-                    // executeCommand is async; onDidTrackChanges will trigger update() when done
-                    vscode.commands.executeCommand(
-                        'diffTracker.keepBlock',
-                        message.filePath,
-                        message.changeBlockId ?? message.changeBlockIndex
-                    );
+                    try {
+                        const success = await vscode.commands.executeCommand<boolean>(
+                            'diffTracker.keepBlock',
+                            message.filePath,
+                            message.changeBlockId ?? message.changeBlockIndex
+                        );
+                        this.postActionAck(message.requestId, success !== false);
+                    } catch (error) {
+                        this.postActionAck(message.requestId, false, error);
+                    }
                 }
                 break;
             case 'keepAll':
                 if (message.filePath) {
-                    // executeCommand is async; onDidTrackChanges will trigger update() when done
-                    vscode.commands.executeCommand('diffTracker.keepAllBlocksInFile', message.filePath);
+                    try {
+                        const success = await vscode.commands.executeCommand<boolean>(
+                            'diffTracker.keepAllBlocksInFile',
+                            message.filePath
+                        );
+                        this.postActionAck(message.requestId, success !== false);
+                    } catch (error) {
+                        this.postActionAck(message.requestId, false, error);
+                    }
                 }
                 break;
             case 'revertAll':
                 if (message.filePath) {
-                    // executeCommand is async; onDidTrackChanges will trigger update() when done
-                    vscode.commands.executeCommand('diffTracker.revertAllBlocksInFile', message.filePath);
+                    try {
+                        const success = await vscode.commands.executeCommand<boolean>(
+                            'diffTracker.revertAllBlocksInFile',
+                            message.filePath
+                        );
+                        this.postActionAck(message.requestId, success !== false);
+                    } catch (error) {
+                        this.postActionAck(message.requestId, false, error);
+                    }
                 }
                 break;
             case 'setStyle':
@@ -201,6 +237,19 @@ export class WebviewDiffPanel {
                 }
                 break;
         }
+    }
+
+    private postActionAck(requestId: string | undefined, ok: boolean, error?: unknown): void {
+        if (!requestId) {
+            return;
+        }
+
+        this.panel.webview.postMessage({
+            command: 'actionAck',
+            requestId,
+            ok,
+            error: ok ? undefined : (error instanceof Error ? error.message : String(error ?? 'Unknown error'))
+        });
     }
 
     private findBlockIndex(filePath: string, blockIndex?: number, lineNumber?: number): number | undefined {
@@ -349,6 +398,10 @@ export class WebviewDiffPanel {
         .toolbar button:hover {
             background: var(--vscode-button-hoverBackground, #1177bb);
         }
+        .toolbar button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
         .toolbar button.secondary {
             background: var(--vscode-button-secondaryBackground, #3a3d41);
             color: var(--vscode-button-secondaryForeground, #ccc);
@@ -431,6 +484,13 @@ export class WebviewDiffPanel {
             line-height: 1.2;
             height: 18px;
         }
+        .hunk-actions button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .hunk-actions.is-busy button {
+            pointer-events: none;
+        }
         .hunk-actions .btn-revert {
             background: var(--vscode-button-secondaryBackground);
             color: var(--vscode-button-secondaryForeground);
@@ -508,14 +568,74 @@ export class WebviewDiffPanel {
         let currentExpandAll = false;
         let fileDiffInstance = null;
         let fileDiffMeta = null;
+        let pendingMutationRequestId = null;
+        let pendingGlobalActionRequestId = null;
+        let waitingForRefresh = false;
+        let requestSequence = 0;
+        const pendingBlockActions = new Set();
+        const pendingRequests = new Map();
 
         const DEBUG_BLOCK_ANNOTATION = false;
+        const DEBUG_ACTION_FLOW = false;
 
         function debugBlockAnnotation(message, data) {
             if (!DEBUG_BLOCK_ANNOTATION) {
                 return;
             }
             console.debug('[diff-tracker][block-annotation]', message, data);
+        }
+
+        function debugActionFlow(message, data) {
+            if (!DEBUG_ACTION_FLOW) {
+                return;
+            }
+            console.debug('[diff-tracker][action-flow]', message, data);
+        }
+
+        function createRequestId(command, blockId) {
+            requestSequence += 1;
+            return command + ':' + (blockId || 'global') + ':' + Date.now() + ':' + requestSequence;
+        }
+
+        function isMutationLocked() {
+            return pendingMutationRequestId !== null || waitingForRefresh;
+        }
+
+        function setToolbarButtonsDisabled(disabled) {
+            btnKeepAll.disabled = disabled;
+            btnRejectAll.disabled = disabled;
+        }
+
+        function updateToolbarMutationState() {
+            setToolbarButtonsDisabled(isMutationLocked());
+        }
+
+        function setBlockWrapperBusy(wrapper, busy) {
+            if (!wrapper) {
+                return;
+            }
+            wrapper.classList.toggle('is-busy', busy);
+            const buttons = wrapper.querySelectorAll('button');
+            buttons.forEach(button => {
+                button.disabled = busy;
+            });
+        }
+
+        function beginMutation(requestId, meta) {
+            pendingMutationRequestId = requestId;
+            pendingRequests.set(requestId, meta);
+            if (meta.scope === 'block' && meta.blockId) {
+                pendingBlockActions.add(meta.blockId);
+            }
+            if (meta.scope === 'global') {
+                pendingGlobalActionRequestId = requestId;
+            }
+            updateToolbarMutationState();
+            debugActionFlow('begin', {
+                requestId,
+                ...meta,
+                changeBlocks: changeBlocks.length
+            });
         }
 
         function toPositiveInt(value) {
@@ -744,6 +864,38 @@ export class WebviewDiffPanel {
             return annotations;
         }
 
+        function sendBlockMutation(command, blockId, wrapper) {
+            if (!blockId || isMutationLocked()) {
+                return;
+            }
+
+            const requestId = createRequestId(command, blockId);
+            beginMutation(requestId, { scope: 'block', blockId, command });
+            setBlockWrapperBusy(wrapper, true);
+
+            vscode.postMessage({
+                command,
+                filePath: filePath,
+                changeBlockId: blockId,
+                requestId
+            });
+        }
+
+        function sendGlobalMutation(command) {
+            if (isMutationLocked()) {
+                return;
+            }
+
+            const requestId = createRequestId(command, 'global');
+            beginMutation(requestId, { scope: 'global', command });
+
+            vscode.postMessage({
+                command,
+                filePath: filePath,
+                requestId
+            });
+        }
+
         function createHunkActionButtons(blockId, blockIndex) {
             const wrapper = document.createElement('div');
             wrapper.className = 'hunk-actions';
@@ -754,11 +906,7 @@ export class WebviewDiffPanel {
             revertBtn.title = 'Revert this change (block ' + (blockIndex + 1) + ')';
             revertBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                vscode.postMessage({ 
-                    command: 'revertBlock', 
-                    filePath: filePath,
-                    changeBlockId: blockId
-                });
+                sendBlockMutation('revertBlock', blockId, wrapper);
             });
 
             const keepBtn = document.createElement('button');
@@ -767,15 +915,14 @@ export class WebviewDiffPanel {
             keepBtn.title = 'Accept this change (block ' + (blockIndex + 1) + ')';
             keepBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                vscode.postMessage({ 
-                    command: 'keepBlock', 
-                    filePath: filePath,
-                    changeBlockId: blockId
-                });
+                sendBlockMutation('keepBlock', blockId, wrapper);
             });
 
             wrapper.appendChild(revertBtn);
             wrapper.appendChild(keepBtn);
+            if (isMutationLocked() || pendingBlockActions.has(blockId)) {
+                setBlockWrapperBusy(wrapper, true);
+            }
             return wrapper;
         }
 
@@ -789,6 +936,7 @@ export class WebviewDiffPanel {
             
             if (!hasContentDiff && !hasBlocks) {
                 container.innerHTML = '<div class="no-changes"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg><span>No changes detected</span></div>';
+                updateToolbarMutationState();
                 return;
             }
 
@@ -825,6 +973,7 @@ export class WebviewDiffPanel {
             btnUnified.classList.toggle('secondary', style !== 'unified');
             btnWrap.classList.toggle('secondary', !currentWrap);
             btnExpand.classList.toggle('secondary', !currentExpandAll);
+            updateToolbarMutationState();
         }
 
         btnSplit.addEventListener('click', () => {
@@ -846,10 +995,10 @@ export class WebviewDiffPanel {
             vscode.postMessage({ command: 'setExpandAll', expandAll: currentExpandAll });
         });
         btnKeepAll.addEventListener('click', () => {
-            vscode.postMessage({ command: 'keepAll', filePath: filePath });
+            sendGlobalMutation('keepAll');
         });
         btnRejectAll.addEventListener('click', () => {
-            vscode.postMessage({ command: 'revertAll', filePath: filePath });
+            sendGlobalMutation('revertAll');
         });
 
         // Handle messages from extension
@@ -857,6 +1006,49 @@ export class WebviewDiffPanel {
             const message = event.data;
             if (message.command === 'setTheme' && fileDiffInstance) {
                 fileDiffInstance.setThemeType(message.themeType);
+            } else if (message.command === 'actionAck') {
+                const requestId = typeof message.requestId === 'string' ? message.requestId : undefined;
+                if (!requestId) {
+                    return;
+                }
+
+                const requestMeta = pendingRequests.get(requestId);
+                if (!requestMeta) {
+                    debugActionFlow('ack-stale', { requestId });
+                    return;
+                }
+
+                pendingRequests.delete(requestId);
+                if (pendingMutationRequestId === requestId) {
+                    pendingMutationRequestId = null;
+                }
+                if (requestMeta.scope === 'block' && requestMeta.blockId) {
+                    pendingBlockActions.delete(requestMeta.blockId);
+                }
+                if (requestMeta.scope === 'global' && pendingGlobalActionRequestId === requestId) {
+                    pendingGlobalActionRequestId = null;
+                }
+
+                const ok = message.ok !== false;
+                debugActionFlow('ack', {
+                    requestId,
+                    ok,
+                    requestMeta,
+                    error: message.error
+                });
+
+                if (!ok) {
+                    waitingForRefresh = false;
+                    updateToolbarMutationState();
+                    const errorMessage = typeof message.error === 'string' ? message.error : 'Unknown error';
+                    console.warn('[diff-tracker] action failed', { requestId, error: errorMessage });
+                    renderDiff(currentStyle);
+                    return;
+                }
+
+                // Keep controls locked until updateData arrives so stale actions cannot fire.
+                waitingForRefresh = true;
+                updateToolbarMutationState();
             } else if (message.command === 'updateData') {
                 // Update data and re-render with current style
                 if (typeof message.filePath === 'string') {
@@ -880,6 +1072,11 @@ export class WebviewDiffPanel {
                 if (typeof message.expandAll === 'boolean') {
                     currentExpandAll = message.expandAll;
                 }
+                waitingForRefresh = false;
+                pendingMutationRequestId = null;
+                pendingGlobalActionRequestId = null;
+                pendingRequests.clear();
+                pendingBlockActions.clear();
                 renderDiff(currentStyle);
             }
         });
