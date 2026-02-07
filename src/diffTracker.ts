@@ -56,12 +56,16 @@ export class DiffTracker {
     private isRecording = false;
     private fileSnapshots = new Map<string, string>();
     private trackedChanges = new Map<string, FileDiff>();
+    private trackedChangesVersion = 0;
+    private trackedChangesCacheVersion = -1;
+    private trackedChangesCache: FileDiff[] = [];
     private lineChanges = new Map<string, LineChange[]>();
     private inlineViews = new Map<string, InlineDiffView>();
     private disposables: vscode.Disposable[] = [];
     private fileWatchers: vscode.FileSystemWatcher[] = [];
     private ignoreMatchers = new Map<string, Ignore>();
     private ignoreResultCache = new Map<string, boolean>();
+    private readonly ignoreResultCacheMaxEntries = 5000;
     private gitignoreCache = new Map<string, { files: string[]; mtimeMap: Map<string, number> }>();
     private externalWatcherEnabled = false;
     private snapshotInitialized = false;
@@ -101,7 +105,7 @@ export class DiffTracker {
     public startRecording() {
         this.isRecording = true;
         this.fileSnapshots.clear();
-        this.trackedChanges.clear();
+        this.clearTrackedChanges();
         this.lineChanges.clear();
         this.inlineViews.clear();
         this.pendingExternalChanges.clear();
@@ -132,7 +136,7 @@ export class DiffTracker {
     }
 
     public clearDiffs() {
-        this.trackedChanges.clear();
+        this.clearTrackedChanges();
         this.lineChanges.clear();
         this.inlineViews.clear();
         this._onDidTrackChanges.fire();
@@ -148,7 +152,7 @@ export class DiffTracker {
         this.clearDocumentChangeTimers();
 
         this.fileSnapshots.clear();
-        this.trackedChanges.clear();
+        this.clearTrackedChanges();
         this.lineChanges.clear();
         this.inlineViews.clear();
         this.pendingExternalChanges.clear();
@@ -460,7 +464,7 @@ export class DiffTracker {
         }
 
         const ignored = matcher.ignores(relPath);
-        this.ignoreResultCache.set(cacheKey, ignored);
+        this.setIgnoreResultCache(cacheKey, ignored);
         return ignored;
     }
 
@@ -470,7 +474,7 @@ export class DiffTracker {
         for (const filePath of this.trackedChanges.keys()) {
             const uri = vscode.Uri.file(filePath);
             if (this.isPathIgnored(uri)) {
-                this.trackedChanges.delete(filePath);
+                this.deleteTrackedChange(filePath);
                 this.lineChanges.delete(filePath);
                 this.inlineViews.delete(filePath);
                 changed = true;
@@ -718,7 +722,7 @@ export class DiffTracker {
 
         // Ignore pure EOL-style / final-EOL toggles and track only logical line changes.
         if (sameLogicalLines) {
-            this.trackedChanges.delete(filePath);
+            this.deleteTrackedChange(filePath);
             this.lineChanges.delete(filePath);
             this.inlineViews.delete(filePath);
             this._onDidTrackChanges.fire();
@@ -737,7 +741,7 @@ export class DiffTracker {
         const fileName = filePath.split('/').pop() || filePath;
         const isDeleted = originalContent.length > 0 && currentContent.length === 0;
 
-        this.trackedChanges.set(filePath, {
+        this.setTrackedChange(filePath, {
             filePath,
             fileName,
             originalContent,
@@ -782,7 +786,7 @@ export class DiffTracker {
             acceptedCount++;
         }
 
-        this.trackedChanges.clear();
+        this.clearTrackedChanges();
         this.lineChanges.clear();
         this.inlineViews.clear();
         this._onDidTrackChanges.fire();
@@ -800,7 +804,7 @@ export class DiffTracker {
             return false;
         }
 
-        this.trackedChanges.delete(filePath);
+        this.deleteTrackedChange(filePath);
         this.lineChanges.delete(filePath);
         this.inlineViews.delete(filePath);
         this._onDidTrackChanges.fire();
@@ -844,8 +848,13 @@ export class DiffTracker {
     }
 
     public getTrackedChanges(): FileDiff[] {
-        return Array.from(this.trackedChanges.values())
-            .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+        if (this.trackedChangesCacheVersion !== this.trackedChangesVersion) {
+            this.trackedChangesCache = Array.from(this.trackedChanges.values())
+                .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+            this.trackedChangesCacheVersion = this.trackedChangesVersion;
+        }
+
+        return this.trackedChangesCache.slice();
     }
 
     public getLineChanges(filePath: string): LineChange[] | undefined {
@@ -1045,7 +1054,7 @@ export class DiffTracker {
         this.fileSnapshots.set(filePath, currentContent);
 
         // Clear tracked changes for this file
-        this.trackedChanges.delete(filePath);
+        this.deleteTrackedChange(filePath);
         this.lineChanges.delete(filePath);
         this.inlineViews.delete(filePath);
 
@@ -1413,12 +1422,10 @@ export class DiffTracker {
         originalHasFinalEol: boolean,
         currentHasFinalEol: boolean
     ): { lineChanges: LineChange[]; inlineView: InlineDiffView } {
-        const originalComparable = originalLines.map(line => this.normalizeLineForComparison(line));
-        const currentComparable = currentLines.map(line => this.normalizeLineForComparison(line));
         const originalNormalized = originalLines.map(line => this.normalizeLineForMatch(line));
         const currentNormalized = currentLines.map(line => this.normalizeLineForMatch(line));
 
-        const diffResult = Diff.diffArrays(originalComparable, currentComparable);
+        const diffResult = Diff.diffArrays(originalLines, currentLines);
         const lineChanges: LineChange[] = [];
         const inlineLines: string[] = [];
         const inlineTypes: InlineLineType[] = [];
@@ -2185,8 +2192,39 @@ export class DiffTracker {
         return value.trim();
     }
 
-    private normalizeLineForComparison(input: string | undefined): string {
-        return (input ?? '').replace(/\r$/, '');
+    private setTrackedChange(filePath: string, diff: FileDiff): void {
+        this.trackedChanges.set(filePath, diff);
+        this.markTrackedChangesDirty();
+    }
+
+    private deleteTrackedChange(filePath: string): void {
+        if (this.trackedChanges.delete(filePath)) {
+            this.markTrackedChangesDirty();
+        }
+    }
+
+    private clearTrackedChanges(): void {
+        if (this.trackedChanges.size === 0) {
+            return;
+        }
+        this.trackedChanges.clear();
+        this.markTrackedChangesDirty();
+    }
+
+    private markTrackedChangesDirty(): void {
+        this.trackedChangesVersion++;
+    }
+
+    private setIgnoreResultCache(cacheKey: string, ignored: boolean): void {
+        this.ignoreResultCache.set(cacheKey, ignored);
+        if (this.ignoreResultCache.size <= this.ignoreResultCacheMaxEntries) {
+            return;
+        }
+
+        const oldestKey = this.ignoreResultCache.keys().next().value as string | undefined;
+        if (oldestKey !== undefined) {
+            this.ignoreResultCache.delete(oldestKey);
+        }
     }
 
     public dispose() {
