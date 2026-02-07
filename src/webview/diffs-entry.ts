@@ -1,1 +1,1 @@
-export { FileDiff, parseDiffFromFile, diffAcceptRejectHunk } from '@pierre/diffs';
+export { FileDiff, parseDiffFromFile } from '@pierre/diffs';

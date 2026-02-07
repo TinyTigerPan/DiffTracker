@@ -503,8 +503,8 @@ export class WebviewDiffPanel {
 
     <script src="${diffsBundleUri}"></script>
     <script>
-        const { FileDiff, parseDiffFromFile, diffAcceptRejectHunk } = window.PierreDiffs || {};
-        if (!FileDiff || !parseDiffFromFile || !diffAcceptRejectHunk) {
+        const { FileDiff, parseDiffFromFile } = window.PierreDiffs || {};
+        if (!FileDiff || !parseDiffFromFile) {
             throw new Error('Failed to load local @pierre/diffs bundle.'); 
         }
 

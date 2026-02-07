@@ -90,8 +90,6 @@ This extension provides the following settings:
 | `diffTracker.highlightModifiedLines` | `true` | Highlight modified lines with blue background |
 | `diffTracker.highlightWordChanges` | `true` | Highlight word-level changes within modified lines |
 | `diffTracker.watchExclude` | `[]` | Additional watch ignore patterns (`.gitignore` style) |
-| `diffTracker.externalPolling` | `true` | Poll filesystem as a fallback when watcher misses updates |
-| `diffTracker.externalPollingIntervalMs` | `2000` | Polling interval in milliseconds |
 
 You can toggle display/highlight settings in the sidebar **Settings** panel, and edit watch ignore patterns via **Edit Watch Ignores**.
 

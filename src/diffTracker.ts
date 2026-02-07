@@ -865,10 +865,6 @@ export class DiffTracker {
         return this.fileSnapshots.get(filePath);
     }
 
-    public getInlineLineTypes(filePath: string): InlineLineType[] | undefined {
-        return this.inlineViews.get(filePath)?.lineTypes;
-    }
-
     public getInlineContent(filePath: string): string | undefined {
         const view = this.ensureInlineView(filePath);
         if (!view) {

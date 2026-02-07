@@ -101,16 +101,6 @@
             "type": "string"
           },
           "description": "Additional ignore patterns for file watching (one pattern per entry, gitignore-style)"
-        },
-        "diffTracker.externalPolling": {
-          "type": "boolean",
-          "default": true,
-          "description": "Fallback polling for external file changes when file watcher misses"
-        },
-        "diffTracker.externalPollingIntervalMs": {
-          "type": "number",
-          "default": 2000,
-          "description": "Polling interval in milliseconds for external file changes"
         }
       }
     },
@@ -210,6 +200,11 @@
         "icon": "$(go-to-file)"
       },
       {
+        "command": "diffTracker.openDiffDefault",
+        "title": "Open Diff (Default)",
+        "category": "Diff Tracker"
+      },
+      {
         "command": "diffTracker.revertAllBlocksInFile",
         "title": "Revert All Changes in File",
         "category": "Diff Tracker"
@@ -251,23 +246,30 @@
       "view/item/context": [
         {
           "command": "diffTracker.openOriginalFile",
-          "when": "viewItem == changedFile",
+          "when": "view == diffTracker.changesView && viewItem == changedFile",
           "group": "inline"
         },
         {
           "command": "diffTracker.showSideBySideDiff",
-          "when": "viewItem == changedFile",
+          "when": "view == diffTracker.changesView && viewItem == changedFile",
           "group": "inline"
         },
         {
           "command": "diffTracker.revertFile",
-          "when": "viewItem == changedFile",
+          "when": "view == diffTracker.changesView && viewItem == changedFile",
           "group": "inline"
         },
         {
           "command": "diffTracker.showWebviewDiff",
-          "when": "viewItem == changedFile",
+          "when": "view == diffTracker.changesView && viewItem == changedFile",
           "group": "inline"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "diffTracker.openDiffDefault",
+          "when": "resourceScheme == file && diffTracker.isRecording",
+          "group": "navigation"
         }
       ],
       "view/title": [
