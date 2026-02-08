@@ -15,9 +15,11 @@ Diff Tracker is a VS Code extension that records file changes and provides three
 |:---------------:|:--------------:|
 | ![Word diff](./resources/webview1.png) | ![Settings](./resources/webview2.png) |
 
+
 |               Editor Inline View                |    Editor Inline View (hover effect)    |
 | :---------------------------------------------: | :-------------------------------------: |
 | ![Editor highlighting](./resources/inline1.png) | ![Inline diff](./resources/inline2.png) |
+
 
 | Inline View 2 | Side-by-side diff |
 |:---------------:|:--------------:|
@@ -144,6 +146,29 @@ You can toggle display/highlight settings in the sidebar **Settings** panel, and
 - Fix WebView empty-file rendering fallback that could hide block actions after full deletion
 - Unify inline virtual URI mapping and refresh flow to prevent stale inline readonly content
 - Improve mixed newline handling (LF/CRLF/CR) in Keep/Revert block operations
+
+### 0.5.0
+- Add Explorer file context action for Diff Tracker while recording, with the final label: **Open with Diff Tracker**
+
+- Add configurable default open mode for changed files (WebView / Inline / Side-by-side / Original / Split Original+WebView)
+
+- Add `Open split view` mode (left original file + right WebView diff)
+
+- Add global recording toggle shortcut: `Shift+Alt+D`
+
+- Improve changes tree to workspace-relative nested directory grouping
+
+- Use VS Code native file icons in the changes tree
+
+- Show changed-file count badge on the Diff Tracker activity icon
+
+- Add and streamline global file actions in changes view workflows (Keep All / Revert All)
+
+- Add `Clear Diffs` baseline reset to current workspace state
+
+- lots of optimizations & fixes
+
+  
 
 ## License
 
