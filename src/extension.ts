@@ -547,24 +547,26 @@ export function activate(context: vscode.ExtensionContext) {
     };
 
     // Update decorations when changes are tracked
-    diffTracker.onDidTrackChanges((event: TrackChangesEvent) => {
-        refreshChangesTree();
+    context.subscriptions.push(
+        diffTracker.onDidTrackChanges((event: TrackChangesEvent) => {
+            refreshChangesTree();
 
-        if (event.fullRefresh) {
-            updateVisibleDecorations();
-            return;
-        }
+            if (event.fullRefresh) {
+                updateVisibleDecorations();
+                return;
+            }
 
-        const affectedFiles = new Set<string>([
-            ...event.changedFiles,
-            ...event.removedFiles
-        ]);
-        if (affectedFiles.size === 0) {
-            return;
-        }
+            const affectedFiles = new Set<string>([
+                ...event.changedFiles,
+                ...event.removedFiles
+            ]);
+            if (affectedFiles.size === 0) {
+                return;
+            }
 
-        updateVisibleDecorations(affectedFiles);
-    });
+            updateVisibleDecorations(affectedFiles);
+        })
+    );
 
     refreshChangesTree();
 
