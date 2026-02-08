@@ -201,7 +201,7 @@
       },
       {
         "command": "diffTracker.openDiffDefault",
-        "title": "Open Diff (Default)",
+        "title": "Open with Diff Tracker",
         "category": "Diff Tracker"
       },
       {
@@ -269,7 +269,7 @@
         {
           "command": "diffTracker.openDiffDefault",
           "when": "resourceScheme == file && diffTracker.isRecording",
-          "group": "navigation"
+          "group": "2_main@1"
         }
       ],
       "view/title": [
