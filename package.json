@@ -2,7 +2,7 @@
   "name": "diff-tracker",
   "displayName": "Diff Tracker",
   "description": "Visual file diff tracking - record and display changes in real-time",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "Wizyoung",
   "author": "Wizyoung",
   "icon": "resources/marketplace-icon.png",
@@ -114,12 +114,14 @@
       {
         "command": "diffTracker.startRecording",
         "title": "Start Recording",
-        "category": "Diff Tracker"
+        "category": "Diff Tracker",
+        "icon": "$(record)"
       },
       {
         "command": "diffTracker.stopRecording",
         "title": "Stop Recording",
-        "category": "Diff Tracker"
+        "category": "Diff Tracker",
+        "icon": "$(debug-stop)"
       },
       {
         "command": "diffTracker.showDiffs",
@@ -273,6 +275,16 @@
         }
       ],
       "view/title": [
+        {
+          "command": "diffTracker.startRecording",
+          "when": "view == diffTracker.changesView && !diffTracker.isRecording",
+          "group": "navigation"
+        },
+        {
+          "command": "diffTracker.stopRecording",
+          "when": "view == diffTracker.changesView && diffTracker.isRecording",
+          "group": "navigation"
+        },
         {
           "command": "diffTracker.clearDiffs",
           "when": "view == diffTracker.changesView",
