@@ -1,7 +1,9 @@
 # Diff Tracker
 
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code%20Marketplace-Diff%20Tracker-007ACC?logo=visualstudiocode&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=Wizyoung.diff-tracker)
+[![VS Code Marketplace Downloads](https://vsmarketplacebadges.dev/downloads-short/Wizyoung.diff-tracker.svg)](https://marketplace.visualstudio.com/items?itemName=Wizyoung.diff-tracker)
 [![Open VSX](https://img.shields.io/badge/Open%20VSX-Diff%20Tracker-5E60E7?logo=opensourceinitiative&logoColor=white)](https://open-vsx.org/extension/Wizyoung/diff-tracker)
+[![Open VSX Downloads](https://img.shields.io/open-vsx/dt/Wizyoung/diff-tracker?label=downloads)](https://open-vsx.org/extension/Wizyoung/diff-tracker)
 
 Diff Tracker is a VS Code extension that records file changes and provides three review modes:
 - Inline readonly diff document
