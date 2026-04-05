@@ -206,3 +206,8 @@ try {
 ## License
 
 MIT
+
+## Acknowledge
+[![LinuxDO](https://img.shields.io/badge/Community-Linux.do-blue?style=flat-square)](https://linux.do/)
+
+Discuss, free ai, and get help at [linux.do](https://linux.do/).
