@@ -98,10 +98,13 @@ This extension provides the following settings:
 | `diffTracker.highlightModifiedLines` | `true` | Highlight modified lines with blue background |
 | `diffTracker.highlightWordChanges` | `true` | Highlight word-level changes within modified lines |
 | `diffTracker.openWebviewBeside` | `false` | Open Webview diff in a side editor group instead of the current editor group |
+| `diffTracker.useGitIgnoreExcludes` | `true` | Apply ignore rules from `.gitignore` files and `.git/info/exclude` |
+| `diffTracker.useBuiltInExcludes` | `true` | Apply built-in ignore rules for common folders like `.git`, `node_modules`, `dist`, and `coverage` |
+| `diffTracker.useVSCodeExcludes` | `true` | Apply VS Code exclude settings from `files.watcherExclude`, `search.exclude`, and `files.exclude` |
 | `diffTracker.watchExclude` | `[]` | Additional watch ignore patterns (`.gitignore` style) |
 | `diffTracker.onlyTrackAutomatedChanges` | `false` | Ignore manual typing in VS Code. External CLI/tool edits are still tracked, and VS Code extension edits can be tracked when they open an automation session first |
 
-You can toggle display/highlight settings in the sidebar **Settings** panel, and edit watch ignore patterns via **Edit Watch Ignores**.
+You can toggle display/highlight/ignore settings in the sidebar **Settings** panel, and edit watch ignore patterns via **Edit Watch Ignores**.
 
 When `diffTracker.openWebviewBeside` is enabled, Webview diff opens in a side editor group. By default it opens in the current editor group.
 
