@@ -99,6 +99,21 @@
           "default": false,
           "description": "When opening Webview diff, place it in a side editor group instead of the current one"
         },
+        "diffTracker.useGitIgnoreExcludes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Apply ignore rules from .gitignore files and .git/info/exclude"
+        },
+        "diffTracker.useBuiltInExcludes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Apply built-in ignore rules for common folders like .git, node_modules, dist, and coverage"
+        },
+        "diffTracker.useVSCodeExcludes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Apply VS Code exclude settings from files.watcherExclude, search.exclude, and files.exclude"
+        },
         "diffTracker.watchExclude": {
           "type": "array",
           "default": [],

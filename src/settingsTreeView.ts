@@ -84,6 +84,15 @@ export class SettingsTreeDataProvider implements vscode.TreeDataProvider<Setting
             ]
         },
         {
+            id: 'ignores',
+            label: 'Ignores',
+            items: [
+                { key: 'useGitIgnoreExcludes', label: 'Use .gitignore rules' },
+                { key: 'useBuiltInExcludes', label: 'Use built-in ignores' },
+                { key: 'useVSCodeExcludes', label: 'Use VS Code excludes' }
+            ]
+        },
+        {
             id: 'recording',
             label: 'Recording',
             items: [
