@@ -172,7 +172,7 @@ export class WatchExcludePanel {
 </head>
 <body>
     <h1>Watch ignore patterns</h1>
-    <p>Rules are applied in this order:</p>
+    <p>Rules are applied in this order when their matching settings are enabled:</p>
     <ul>
         <li>.gitignore files (including nested ones)</li>
         <li>Built-in defaults (.git, node_modules, out, dist, build, coverage, tmp)</li>

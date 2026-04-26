@@ -52,6 +52,28 @@ function getDefaultOpenMode(): DefaultOpenMode {
     return 'webview';
 }
 
+function getConfirmReversions(): boolean {
+    const config = vscode.workspace.getConfiguration('diffTracker');
+    return config.get<boolean>('confirmReversions', true);
+}
+
+async function confirmWholeFileReversion(message: string, confirmLabel: string): Promise<boolean> {
+    if (!getConfirmReversions()) {
+        return true;
+    }
+
+    const answer = await vscode.window.showWarningMessage(
+        message,
+        { modal: true },
+        confirmLabel,
+        'Cancel'
+    );
+
+    return answer === confirmLabel;
+}
+
+type WholeFileCommandResult = boolean | 'cancelled';
+
 export async function activate(context: vscode.ExtensionContext) {
 
     // Initialize services
@@ -114,6 +136,14 @@ export async function activate(context: vscode.ExtensionContext) {
                 decorationManager.updateDecorations(editor);
             });
             codeLensProvider.refresh();
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('diffTracker.showFullFilePaths')) {
+                refreshChangesTree();
+            }
         })
     );
 
@@ -236,20 +266,19 @@ export async function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            // Confirm with user
-            const answer = await vscode.window.showWarningMessage(
+            const confirmed = await confirmWholeFileReversion(
                 `Revert all ${changes.length} file(s) to their original state? This cannot be undone.`,
-                { modal: true },
-                'Revert All',
-                'Cancel'
+                'Revert All'
             );
 
-            if (answer === 'Revert All') {
-                const revertedCount = await diffTracker.revertAllChanges();
-                refreshChangesTree();
-                decorationManager.clearAllDecorations();
-                vscode.window.showInformationMessage(`Reverted ${revertedCount} file(s)`);
+            if (!confirmed) {
+                return;
             }
+
+            const revertedCount = await diffTracker.revertAllChanges();
+            refreshChangesTree();
+            decorationManager.clearAllDecorations();
+            vscode.window.showInformationMessage(`Reverted ${revertedCount} file(s)`);
         })
     );
 
@@ -269,22 +298,18 @@ export async function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('diffTracker.revertFile', async (filePathOrItem: string | any) => {
-            const filePath = typeof filePathOrItem === 'string'
-                ? filePathOrItem
-                : filePathOrItem?.filePath;
+            const filePath = extractFilePath(filePathOrItem);
 
             if (!filePath) {
                 return;
             }
 
-            const answer = await vscode.window.showWarningMessage(
+            const confirmed = await confirmWholeFileReversion(
                 `Revert changes for ${filePath}? This cannot be undone.`,
-                { modal: true },
-                'Revert',
-                'Cancel'
+                'Revert'
             );
 
-            if (answer !== 'Revert') {
+            if (!confirmed) {
                 return;
             }
 
@@ -420,7 +445,20 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Revert all blocks in a file
     context.subscriptions.push(
-        vscode.commands.registerCommand('diffTracker.revertAllBlocksInFile', async (filePath: string) => {
+        vscode.commands.registerCommand('diffTracker.revertAllBlocksInFile', async (filePathOrItem: string | any) => {
+            const filePath = extractFilePath(filePathOrItem);
+            if (!filePath) {
+                return false;
+            }
+
+            const confirmed = await confirmWholeFileReversion(
+                `Revert changes for ${filePath}? This cannot be undone.`,
+                'Revert'
+            );
+            if (!confirmed) {
+                return 'cancelled' satisfies WholeFileCommandResult;
+            }
+
             const success = await diffTracker.revertFile(filePath);
             if (success) {
                 codeLensProvider.refresh();
@@ -432,7 +470,12 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Keep all blocks in a file (accept all changes)
     context.subscriptions.push(
-        vscode.commands.registerCommand('diffTracker.keepAllBlocksInFile', async (filePath: string) => {
+        vscode.commands.registerCommand('diffTracker.keepAllBlocksInFile', async (filePathOrItem: string | any) => {
+            const filePath = extractFilePath(filePathOrItem);
+            if (!filePath) {
+                return false;
+            }
+
             const success = await diffTracker.keepAllChangesInFile(filePath);
             if (success) {
                 codeLensProvider.refresh();

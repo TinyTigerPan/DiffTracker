@@ -111,7 +111,8 @@ export class DiffTreeDataProvider implements vscode.TreeDataProvider<TreeItem>, 
     }
 
     private createFileItem(fileDiff: FileDiff): TreeItem {
-        const displayName = fileDiff.isDeleted ? `${fileDiff.fileName} [Deleted]` : fileDiff.fileName;
+        const displayPath = this.getFileDisplayPath(fileDiff);
+        const displayName = fileDiff.isDeleted ? `${displayPath} [Deleted]` : displayPath;
         const item = new TreeItem(displayName, vscode.TreeItemCollapsibleState.None);
         item.filePath = fileDiff.filePath;
         item.isDeleted = fileDiff.isDeleted;
@@ -132,6 +133,17 @@ export class DiffTreeDataProvider implements vscode.TreeDataProvider<TreeItem>, 
         item.contextValue = 'changedFile';
 
         return item;
+    }
+
+    private getFileDisplayPath(fileDiff: FileDiff): string {
+        const config = vscode.workspace.getConfiguration('diffTracker');
+        const showFullFilePaths = config.get<boolean>('showFullFilePaths', false);
+
+        if (showFullFilePaths) {
+            return this.toWorkspaceRelative(fileDiff.filePath);
+        }
+
+        return path.basename(fileDiff.filePath);
     }
 
     private toWorkspaceRelative(filePath: string): string {

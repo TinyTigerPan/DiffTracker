@@ -233,11 +233,15 @@ export class WebviewDiffPanel {
             case 'revertAll':
                 if (message.filePath) {
                     try {
-                        const success = await vscode.commands.executeCommand<boolean>(
+                        const result = await vscode.commands.executeCommand<boolean | 'cancelled'>(
                             'diffTracker.revertAllBlocksInFile',
                             message.filePath
                         );
-                        this.postActionAck(message.requestId, success !== false);
+                        if (result === 'cancelled') {
+                            this.postActionAck(message.requestId, true, undefined, true);
+                        } else {
+                            this.postActionAck(message.requestId, result !== false);
+                        }
                     } catch (error) {
                         this.postActionAck(message.requestId, false, error);
                     }
@@ -261,7 +265,7 @@ export class WebviewDiffPanel {
         }
     }
 
-    private postActionAck(requestId: string | undefined, ok: boolean, error?: unknown): void {
+    private postActionAck(requestId: string | undefined, ok: boolean, error?: unknown, cancelled = false): void {
         if (!requestId) {
             return;
         }
@@ -270,6 +274,7 @@ export class WebviewDiffPanel {
             command: 'actionAck',
             requestId,
             ok,
+            cancelled,
             error: ok ? undefined : (error instanceof Error ? error.message : String(error ?? 'Unknown error'))
         });
     }
@@ -1020,12 +1025,21 @@ export class WebviewDiffPanel {
                 }
 
                 const ok = message.ok !== false;
+                const cancelled = message.cancelled === true;
                 debugActionFlow('ack', {
                     requestId,
                     ok,
+                    cancelled,
                     requestMeta,
                     error: message.error
                 });
+
+                if (cancelled) {
+                    waitingForRefresh = false;
+                    updateToolbarMutationState();
+                    renderDiff(currentStyle);
+                    return;
+                }
 
                 if (!ok) {
                     waitingForRefresh = false;

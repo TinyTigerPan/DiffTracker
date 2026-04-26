@@ -2,13 +2,13 @@
   "name": "diff-tracker",
   "displayName": "Diff Tracker",
   "description": "Visual file diff tracking - record and display changes in real-time",
-  "version": "0.6.0",
-  "publisher": "TinyTigerPan",
-  "author": "TinyTigerPan (Fork from Wizyoung)",
+  "version": "0.6.2",
+  "publisher": "virtushda",
+  "author": "virtushda (fork from TinyTigerPan (Fork from Wizyoung))",
   "icon": "resources/marketplace-icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/TinyTigerPan/DiffTracker.git"
+    "url": "https://github.com/virtushda/DiffTracker.git"
   },
   "engines": {
     "vscode": "^1.80.0"
@@ -98,6 +98,31 @@
           "type": "boolean",
           "default": false,
           "description": "When opening Webview diff, place it in a side editor group instead of the current one"
+        },
+        "diffTracker.showFullFilePaths": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show project-relative file paths in the Change Recording tree instead of only the file name"
+        },
+        "diffTracker.confirmReversions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a confirmation dialog before reverting all changes or reverting all changes in a file"
+        },
+        "diffTracker.useGitIgnoreExcludes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Apply ignore rules from .gitignore files and .git/info/exclude"
+        },
+        "diffTracker.useBuiltInExcludes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Apply built-in ignore rules for common folders like .git, node_modules, dist, and coverage"
+        },
+        "diffTracker.useVSCodeExcludes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Apply VS Code exclude settings from files.watcherExclude, search.exclude, and files.exclude"
         },
         "diffTracker.watchExclude": {
           "type": "array",
@@ -229,8 +254,9 @@
       },
       {
         "command": "diffTracker.keepAllBlocksInFile",
-        "title": "Keep All Changes in File",
-        "category": "Diff Tracker"
+        "title": "Accept All Changes in File",
+        "category": "Diff Tracker",
+        "icon": "$(check)"
       },
       {
         "command": "diffTracker.showWebviewDiff",
@@ -269,6 +295,11 @@
         },
         {
           "command": "diffTracker.showSideBySideDiff",
+          "when": "view == diffTracker.changesView && viewItem == changedFile",
+          "group": "inline"
+        },
+        {
+          "command": "diffTracker.keepAllBlocksInFile",
           "when": "view == diffTracker.changesView && viewItem == changedFile",
           "group": "inline"
         },
