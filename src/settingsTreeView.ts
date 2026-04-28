@@ -53,7 +53,7 @@ type SettingGroup = {
     id: string;
     label: string;
     icon?: string;
-    items: Array<{ key: string; label: string }>;
+    items: Array<{ key: string; label: string; defaultValue?: boolean }>;
 };
 
 /**
@@ -90,7 +90,9 @@ export class SettingsTreeDataProvider implements vscode.TreeDataProvider<Setting
             items: [
                 { key: 'useGitIgnoreExcludes', label: 'Use .gitignore rules' },
                 { key: 'useBuiltInExcludes', label: 'Use built-in ignores' },
-                { key: 'useVSCodeExcludes', label: 'Use VS Code excludes' }
+                { key: 'useVSCodeFilesExcludes', label: 'Use VS Code files.exclude' },
+                { key: 'useVSCodeSearchExcludes', label: 'Use VS Code search.exclude', defaultValue: false },
+                { key: 'useVSCodeWatcherExcludes', label: 'Use VS Code watcherExclude', defaultValue: false }
             ]
         },
         {
@@ -177,14 +179,14 @@ export class SettingsTreeDataProvider implements vscode.TreeDataProvider<Setting
                     'preview'
                 ),
                 ...group.items.map(setting => {
-                    const value = config.get<boolean>(setting.key, true);
+                    const value = config.get<boolean>(setting.key, setting.defaultValue ?? true);
                     return new SettingItem(setting.key, setting.label, value);
                 })
             ];
         }
 
         return group.items.map(setting => {
-            const value = config.get<boolean>(setting.key, true);
+            const value = config.get<boolean>(setting.key, setting.defaultValue ?? true);
             return new SettingItem(setting.key, setting.label, value);
         });
     }
@@ -194,7 +196,8 @@ export class SettingsTreeDataProvider implements vscode.TreeDataProvider<Setting
      */
     public async toggleSetting(settingKey: string): Promise<void> {
         const config = vscode.workspace.getConfiguration('diffTracker');
-        const currentValue = config.get<boolean>(settingKey, true);
+        const setting = this.settings.flatMap(group => group.items).find(item => item.key === settingKey);
+        const currentValue = config.get<boolean>(settingKey, setting?.defaultValue ?? true);
         await config.update(settingKey, !currentValue, vscode.ConfigurationTarget.Global);
         this.refresh();
     }

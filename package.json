@@ -2,7 +2,7 @@
   "name": "diff-tracker",
   "displayName": "Diff Tracker",
   "description": "Visual file diff tracking - record and display changes in real-time",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "publisher": "virtushda",
   "author": "virtushda (fork from TinyTigerPan (Fork from Wizyoung))",
   "icon": "resources/marketplace-icon.png",
@@ -122,7 +122,23 @@
         "diffTracker.useVSCodeExcludes": {
           "type": "boolean",
           "default": true,
-          "description": "Apply VS Code exclude settings from files.watcherExclude, search.exclude, and files.exclude"
+          "deprecationMessage": "Deprecated. Use diffTracker.useVSCodeFilesExcludes, diffTracker.useVSCodeSearchExcludes, and diffTracker.useVSCodeWatcherExcludes instead.",
+          "description": "Deprecated compatibility setting for VS Code exclude inheritance"
+        },
+        "diffTracker.useVSCodeFilesExcludes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Apply VS Code Explorer exclude settings from files.exclude. Conditional object rules are ignored."
+        },
+        "diffTracker.useVSCodeSearchExcludes": {
+          "type": "boolean",
+          "default": false,
+          "description": "Apply VS Code search exclude settings from search.exclude. Conditional object rules are ignored."
+        },
+        "diffTracker.useVSCodeWatcherExcludes": {
+          "type": "boolean",
+          "default": false,
+          "description": "Apply VS Code watcher exclude settings from files.watcherExclude. Conditional object rules are ignored."
         },
         "diffTracker.watchExclude": {
           "type": "array",
@@ -372,6 +388,7 @@
     "pretest": "npm run compile",
     "test:webview-anchors": "node test/webview-annotation-mapping.mjs",
     "test:similarity-pairing": "node test/similarity-pairing.mjs",
+    "test:vscode-excludes": "node test/vscode-exclude-matcher.mjs",
     "lint": "eslint src --ext ts",
     "package": "vsce package"
   },

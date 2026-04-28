@@ -176,7 +176,8 @@ export class WatchExcludePanel {
     <ul>
         <li>.gitignore files (including nested ones)</li>
         <li>Built-in defaults (.git, node_modules, out, dist, build, coverage, tmp)</li>
-        <li>VS Code excludes (files.watcherExclude / search.exclude / files.exclude)</li>
+        <li>VS Code excludes (files.exclude by default; search.exclude and files.watcherExclude only when enabled)</li>
+        <li>VS Code conditional exclude objects are ignored</li>
         <li>Patterns below (one per line, gitignore-style)</li>
     </ul>
     <textarea id="patterns" spellcheck="false"></textarea>

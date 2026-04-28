@@ -119,7 +119,9 @@ npm run package
 | `diffTracker.openWebviewBeside` | `false` | 是否将 WebView Diff 打开到旁边的编辑器分组 |
 | `diffTracker.useGitIgnoreExcludes` | `true` | 是否应用来自 `.gitignore` 与 `.git/info/exclude` 的忽略规则 |
 | `diffTracker.useBuiltInExcludes` | `true` | 是否应用内置忽略规则，例如 `.git`、`node_modules`、`dist`、`coverage` |
-| `diffTracker.useVSCodeExcludes` | `true` | 是否应用 VS Code 的排除设置：`files.watcherExclude`、`search.exclude`、`files.exclude` |
+| `diffTracker.useVSCodeFilesExcludes` | `true` | 是否应用来自 `files.exclude` 的 VS Code Explorer 排除设置 |
+| `diffTracker.useVSCodeSearchExcludes` | `false` | 是否应用来自 `search.exclude` 的 VS Code 搜索排除设置 |
+| `diffTracker.useVSCodeWatcherExcludes` | `false` | 是否应用来自 `files.watcherExclude` 的 VS Code 监听排除设置 |
 | `diffTracker.watchExclude` | `[]` | 额外的监听忽略规则，使用 `.gitignore` 风格 |
 | `diffTracker.onlyTrackAutomatedChanges` | `false` | 只记录自动化产生的改动，忽略手动键入 |
 
