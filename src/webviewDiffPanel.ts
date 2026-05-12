@@ -233,11 +233,15 @@ export class WebviewDiffPanel {
             case 'revertAll':
                 if (message.filePath) {
                     try {
-                        const success = await vscode.commands.executeCommand<boolean>(
+                        const result = await vscode.commands.executeCommand<boolean | 'cancelled'>(
                             'diffTracker.revertAllBlocksInFile',
                             message.filePath
                         );
-                        this.postActionAck(message.requestId, success !== false);
+                        if (result === 'cancelled') {
+                            this.postActionAck(message.requestId, true, undefined, true);
+                        } else {
+                            this.postActionAck(message.requestId, result !== false);
+                        }
                     } catch (error) {
                         this.postActionAck(message.requestId, false, error);
                     }
@@ -261,7 +265,7 @@ export class WebviewDiffPanel {
         }
     }
 
-    private postActionAck(requestId: string | undefined, ok: boolean, error?: unknown): void {
+    private postActionAck(requestId: string | undefined, ok: boolean, error?: unknown, cancelled = false): void {
         if (!requestId) {
             return;
         }
@@ -270,6 +274,7 @@ export class WebviewDiffPanel {
             command: 'actionAck',
             requestId,
             ok,
+            cancelled,
             error: ok ? undefined : (error instanceof Error ? error.message : String(error ?? 'Unknown error'))
         });
     }
@@ -424,11 +429,68 @@ export class WebviewDiffPanel {
             color: var(--vscode-foreground, #ccc);
             align-self: center;
         }
+        #diff-scroll-shell {
+            flex: 1;
+            display: flex;
+            min-height: 0;
+            min-width: 0;
+        }
         #diff-container {
             flex: 1;
             overflow: auto;
             padding: 0;
             padding-bottom: 28px;
+            min-width: 0;
+        }
+        #diff-overview-ruler {
+            position: relative;
+            flex: 0 0 10px;
+            width: 10px;
+            background: rgba(127, 127, 127, 0.08);
+            border-left: 1px solid var(--vscode-editorGroup-border, #444);
+        }
+        #diff-overview-ruler.is-empty {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .overview-viewport {
+            position: absolute;
+            left: 1px;
+            right: 1px;
+            top: 0;
+            height: 100%;
+            border: 1px solid rgba(127, 127, 127, 0.42);
+            background: rgba(127, 127, 127, 0.1);
+            pointer-events: none;
+            z-index: 1;
+        }
+        .overview-marker {
+            position: absolute;
+            left: 1px;
+            right: 1px;
+            min-height: 4px;
+            padding: 0;
+            border: 0;
+            border-radius: 1px;
+            cursor: pointer;
+            z-index: 2;
+            appearance: none;
+        }
+        .overview-marker[data-change-type="added"] {
+            background: #2ea043;
+        }
+        .overview-marker[data-change-type="deleted"] {
+            background: #f85149;
+        }
+        .overview-marker[data-change-type="modified"] {
+            background: linear-gradient(to bottom, #f85149 0 50%, #2ea043 50% 100%);
+        }
+        .overview-marker:hover {
+            filter: brightness(1.25);
+        }
+        .overview-marker:focus-visible {
+            outline: 1px solid var(--vscode-focusBorder, #007fd4);
+            outline-offset: 1px;
         }
         .loading {
             display: flex;
@@ -516,8 +578,13 @@ export class WebviewDiffPanel {
         <button id="btn-keep-all" class="btn-keep-all">Keep All</button>
         <button id="btn-reject-all" class="btn-reject-all">Reject All</button>
     </div>
-    <div id="diff-container">
-        <div class="loading">Loading diff...</div>
+    <div id="diff-scroll-shell">
+        <div id="diff-container">
+            <div class="loading">Loading diff...</div>
+        </div>
+        <div id="diff-overview-ruler" class="is-empty" aria-label="Diff overview">
+            <div id="diff-overview-viewport" class="overview-viewport"></div>
+        </div>
     </div>
 
     <script src="${diffsBundleUri}"></script>
@@ -529,6 +596,8 @@ export class WebviewDiffPanel {
 
         const vscode = acquireVsCodeApi();
         const container = document.getElementById('diff-container');
+        const overviewRuler = document.getElementById('diff-overview-ruler');
+        const overviewViewport = document.getElementById('diff-overview-viewport');
         const btnSplit = document.getElementById('btn-split');
         const btnUnified = document.getElementById('btn-unified');
         const btnWrap = document.getElementById('btn-wrap');
@@ -562,6 +631,7 @@ export class WebviewDiffPanel {
         let pendingGlobalActionRequestId = null;
         let waitingForRefresh = false;
         let requestSequence = 0;
+        let overviewRulerUpdateFrame = 0;
         const pendingBlockActions = new Set();
         const pendingRequests = new Map();
 
@@ -886,9 +956,158 @@ export class WebviewDiffPanel {
             });
         }
 
+        function getChangeBlockById(blockId) {
+            if (typeof blockId !== 'string') {
+                return undefined;
+            }
+
+            return changeBlocks.find(block => block && block.blockId === blockId);
+        }
+
+        function getBlockAnchor(blockId) {
+            const anchors = container.querySelectorAll('.hunk-actions[data-change-block-id]');
+            for (const anchor of anchors) {
+                if (anchor.dataset.changeBlockId === blockId) {
+                    return anchor;
+                }
+            }
+
+            return undefined;
+        }
+
+        function clearOverviewRuler() {
+            overviewRuler.replaceChildren(overviewViewport);
+            overviewRuler.classList.add('is-empty');
+            syncOverviewViewport();
+        }
+
+        function syncOverviewViewport() {
+            const rulerHeight = overviewRuler.clientHeight;
+            if (rulerHeight <= 0) {
+                return;
+            }
+
+            const scrollHeight = container.scrollHeight;
+            const viewportHeight = container.clientHeight;
+            if (scrollHeight <= 0 || viewportHeight <= 0 || scrollHeight <= viewportHeight) {
+                overviewViewport.style.top = '0px';
+                overviewViewport.style.height = rulerHeight + 'px';
+                return;
+            }
+
+            const viewportIndicatorHeight = Math.max(12, Math.round((viewportHeight / scrollHeight) * rulerHeight));
+            const maxIndicatorTop = Math.max(0, rulerHeight - viewportIndicatorHeight);
+            const indicatorTop = Math.min(
+                maxIndicatorTop,
+                Math.round((container.scrollTop / scrollHeight) * rulerHeight)
+            );
+
+            overviewViewport.style.top = indicatorTop + 'px';
+            overviewViewport.style.height = viewportIndicatorHeight + 'px';
+        }
+
+        function scrollToChangeBlock(blockId) {
+            const anchor = getBlockAnchor(blockId);
+            if (!anchor) {
+                return;
+            }
+
+            const containerRect = container.getBoundingClientRect();
+            const anchorRect = anchor.getBoundingClientRect();
+            const targetTop = anchorRect.top - containerRect.top + container.scrollTop - 24;
+            container.scrollTo({
+                top: Math.max(0, targetTop),
+                behavior: 'smooth'
+            });
+        }
+
+        function createOverviewMarker(block, top, height) {
+            if (!block || (block.type !== 'added' && block.type !== 'deleted' && block.type !== 'modified')) {
+                return undefined;
+            }
+
+            const marker = document.createElement('button');
+            marker.type = 'button';
+            marker.className = 'overview-marker';
+            marker.dataset.changeBlockId = block.blockId;
+            marker.dataset.changeType = block.type;
+            marker.style.top = top + 'px';
+            marker.style.height = height + 'px';
+
+            const blockNumber = Number.isFinite(block.blockIndex) ? block.blockIndex + 1 : '?';
+            const label = 'Go to ' + block.type + ' change block ' + blockNumber;
+            marker.title = label;
+            marker.setAttribute('aria-label', label);
+            marker.addEventListener('click', () => scrollToChangeBlock(block.blockId));
+            marker.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    scrollToChangeBlock(block.blockId);
+                }
+            });
+
+            return marker;
+        }
+
+        function renderOverviewRuler() {
+            overviewRulerUpdateFrame = 0;
+            clearOverviewRuler();
+
+            if (!Array.isArray(changeBlocks) || changeBlocks.length === 0) {
+                return;
+            }
+
+            const rulerHeight = overviewRuler.clientHeight;
+            const scrollHeight = container.scrollHeight;
+            if (rulerHeight <= 0 || scrollHeight <= 0) {
+                return;
+            }
+
+            const containerRect = container.getBoundingClientRect();
+            const markerHeight = 4;
+            const maxMarkerTop = Math.max(0, rulerHeight - markerHeight);
+            const fragment = document.createDocumentFragment();
+            let markerCount = 0;
+
+            changeBlocks.forEach(block => {
+                if (!block || typeof block.blockId !== 'string') {
+                    return;
+                }
+
+                const blockData = getChangeBlockById(block.blockId);
+                const anchor = getBlockAnchor(block.blockId);
+                if (!blockData || !anchor) {
+                    return;
+                }
+
+                const anchorRect = anchor.getBoundingClientRect();
+                const anchorTop = anchorRect.top - containerRect.top + container.scrollTop;
+                const markerTop = Math.max(0, Math.min(maxMarkerTop, Math.round((anchorTop / scrollHeight) * rulerHeight)));
+                const marker = createOverviewMarker(blockData, markerTop, markerHeight);
+                if (marker) {
+                    fragment.appendChild(marker);
+                    markerCount++;
+                }
+            });
+
+            overviewRuler.appendChild(fragment);
+            overviewRuler.classList.toggle('is-empty', markerCount === 0);
+            syncOverviewViewport();
+        }
+
+        function scheduleOverviewRulerUpdate() {
+            if (overviewRulerUpdateFrame !== 0) {
+                return;
+            }
+
+            overviewRulerUpdateFrame = requestAnimationFrame(renderOverviewRuler);
+        }
+
         function createHunkActionButtons(blockId, blockIndex) {
             const wrapper = document.createElement('div');
             wrapper.className = 'hunk-actions';
+            wrapper.dataset.changeBlockId = blockId;
+            wrapper.dataset.changeBlockIndex = String(blockIndex);
             
             const revertBtn = document.createElement('button');
             revertBtn.className = 'btn-revert';
@@ -926,6 +1145,7 @@ export class WebviewDiffPanel {
             
             if (!hasContentDiff && !hasBlocks) {
                 container.innerHTML = '<div class="no-changes"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg><span>No changes detected</span></div>';
+                clearOverviewRuler();
                 updateToolbarMutationState();
                 return;
             }
@@ -964,6 +1184,7 @@ export class WebviewDiffPanel {
             btnWrap.classList.toggle('secondary', !currentWrap);
             btnExpand.classList.toggle('secondary', !currentExpandAll);
             updateToolbarMutationState();
+            scheduleOverviewRulerUpdate();
         }
 
         btnSplit.addEventListener('click', () => {
@@ -990,12 +1211,15 @@ export class WebviewDiffPanel {
         btnRejectAll.addEventListener('click', () => {
             sendGlobalMutation('revertAll');
         });
+        container.addEventListener('scroll', syncOverviewViewport);
+        window.addEventListener('resize', scheduleOverviewRulerUpdate);
 
         // Handle messages from extension
         window.addEventListener('message', event => {
             const message = event.data;
             if (message.command === 'setTheme' && fileDiffInstance) {
                 fileDiffInstance.setThemeType(message.themeType);
+                scheduleOverviewRulerUpdate();
             } else if (message.command === 'actionAck') {
                 const requestId = typeof message.requestId === 'string' ? message.requestId : undefined;
                 if (!requestId) {
@@ -1020,12 +1244,21 @@ export class WebviewDiffPanel {
                 }
 
                 const ok = message.ok !== false;
+                const cancelled = message.cancelled === true;
                 debugActionFlow('ack', {
                     requestId,
                     ok,
+                    cancelled,
                     requestMeta,
                     error: message.error
                 });
+
+                if (cancelled) {
+                    waitingForRefresh = false;
+                    updateToolbarMutationState();
+                    renderDiff(currentStyle);
+                    return;
+                }
 
                 if (!ok) {
                     waitingForRefresh = false;

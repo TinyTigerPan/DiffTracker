@@ -3,6 +3,12 @@ import * as Diff from 'diff';
 import * as path from 'path';
 import * as fs from 'fs';
 import ignore, { Ignore } from 'ignore';
+import {
+    collectEnabledVSCodeExcludePatterns,
+    resolveVSCodeExcludeSourceEnabled,
+    VSCodeExcludeMatcher,
+    VSCodeExcludeSource
+} from './vscodeExcludeMatcher';
 
 export interface FileDiff {
     filePath: string;
@@ -93,6 +99,7 @@ export class DiffTracker {
     private disposables: vscode.Disposable[] = [];
     private fileWatchers: vscode.FileSystemWatcher[] = [];
     private ignoreMatchers = new Map<string, Ignore>();
+    private vscodeExcludeMatchers = new Map<string, VSCodeExcludeMatcher>();
     private ignoreResultCache = new Map<string, boolean>();
     private readonly ignoreResultCacheMaxEntries = 5000;
     private gitignoreCache = new Map<string, { files: string[]; mtimeMap: Map<string, number> }>();
@@ -141,6 +148,12 @@ export class DiffTracker {
                 if (
                     e.affectsConfiguration('diffTracker.onlyTrackAutomatedChanges') ||
                     e.affectsConfiguration('diffTracker.onlyTrackVSCodeChanges') ||
+                    e.affectsConfiguration('diffTracker.useGitIgnoreExcludes') ||
+                    e.affectsConfiguration('diffTracker.useBuiltInExcludes') ||
+                    e.affectsConfiguration('diffTracker.useVSCodeExcludes') ||
+                    e.affectsConfiguration('diffTracker.useVSCodeFilesExcludes') ||
+                    e.affectsConfiguration('diffTracker.useVSCodeSearchExcludes') ||
+                    e.affectsConfiguration('diffTracker.useVSCodeWatcherExcludes') ||
                     e.affectsConfiguration('diffTracker.watchExclude') ||
                     e.affectsConfiguration('files.watcherExclude') ||
                     e.affectsConfiguration('search.exclude') ||
@@ -731,6 +744,7 @@ export class DiffTracker {
 
     private async refreshIgnoreMatchers(): Promise<void> {
         this.ignoreMatchers.clear();
+        this.vscodeExcludeMatchers.clear();
         this.ignoreResultCache.clear();
         const folders = vscode.workspace.workspaceFolders;
         if (!folders) {
@@ -740,43 +754,78 @@ export class DiffTracker {
         for (const folder of folders) {
             const matcher = await this.buildIgnoreMatcher(folder);
             this.ignoreMatchers.set(folder.uri.fsPath, matcher);
+            this.vscodeExcludeMatchers.set(folder.uri.fsPath, this.buildVSCodeExcludeMatcher(folder));
         }
 
         this.pruneIgnoredTrackedChanges();
     }
 
     private getDefaultExcludePatterns(): string[] {
-        return [
-            '**/.git/**',
-            '**/node_modules/**',
-            '**/out/**',
-            '**/dist/**',
-            '**/build/**',
-            '**/coverage/**',
-            '**/tmp/**'
-        ];
+        return this.getDefaultExcludeDirectoryNames().map(name => `**/${name}/**`);
     }
 
-    private getVsCodeExcludePatterns(): string[] {
-        const config = vscode.workspace.getConfiguration();
-        const watcherExclude = config.get<Record<string, boolean>>('files.watcherExclude', {});
-        const searchExclude = config.get<Record<string, boolean>>('search.exclude', {});
-        const filesExclude = config.get<Record<string, boolean>>('files.exclude', {});
-        const patterns = new Set<string>();
+    private getDefaultExcludeDirectoryNames(): string[] {
+        return ['.git', 'node_modules', 'out', 'dist', 'build', 'coverage', 'tmp'];
+    }
 
-        const addPatterns = (obj: Record<string, boolean>) => {
-            Object.entries(obj).forEach(([pattern, enabled]) => {
-                if (enabled) {
-                    patterns.add(pattern);
-                }
-            });
+    private getDefaultExcludeFindFilesPattern(folder: vscode.WorkspaceFolder): vscode.RelativePattern {
+        return new vscode.RelativePattern(folder, `**/{${this.getDefaultExcludeDirectoryNames().join(',')}}/**`);
+    }
+
+    private shouldUseGitIgnoreExcludes(): boolean {
+        const config = vscode.workspace.getConfiguration('diffTracker');
+        return config.get<boolean>('useGitIgnoreExcludes', true);
+    }
+
+    private shouldUseBuiltInExcludes(): boolean {
+        const config = vscode.workspace.getConfiguration('diffTracker');
+        return config.get<boolean>('useBuiltInExcludes', true);
+    }
+
+    private getExplicitDiffTrackerBoolean(folder: vscode.WorkspaceFolder, key: string): boolean | undefined {
+        const config = vscode.workspace.getConfiguration('diffTracker', folder.uri);
+        const inspected = config.inspect<boolean>(key);
+        if (!inspected) {
+            return undefined;
+        }
+
+        if (inspected.workspaceFolderValue !== undefined) {
+            return inspected.workspaceFolderValue;
+        }
+        if (inspected.workspaceValue !== undefined) {
+            return inspected.workspaceValue;
+        }
+        if (inspected.globalValue !== undefined) {
+            return inspected.globalValue;
+        }
+
+        return undefined;
+    }
+
+    private shouldUseVSCodeExcludeSource(folder: vscode.WorkspaceFolder, source: VSCodeExcludeSource): boolean {
+        const keyBySource: Record<VSCodeExcludeSource, string> = {
+            files: 'useVSCodeFilesExcludes',
+            search: 'useVSCodeSearchExcludes',
+            watcher: 'useVSCodeWatcherExcludes'
+        };
+        const defaultBySource: Record<VSCodeExcludeSource, boolean> = {
+            files: true,
+            search: false,
+            watcher: false
         };
 
-        addPatterns(watcherExclude);
-        addPatterns(searchExclude);
-        addPatterns(filesExclude);
+        return resolveVSCodeExcludeSourceEnabled({
+            legacyExplicitValue: this.getExplicitDiffTrackerBoolean(folder, 'useVSCodeExcludes'),
+            source: {
+                defaultValue: defaultBySource[source],
+                explicitValue: this.getExplicitDiffTrackerBoolean(folder, keyBySource[source])
+            }
+        });
+    }
 
-        return Array.from(patterns);
+    private getVSCodeExcludePatterns(folder: vscode.WorkspaceFolder, settingKey: string): string[] {
+        const config = vscode.workspace.getConfiguration(undefined, folder.uri);
+        return collectEnabledVSCodeExcludePatterns(config.get<Record<string, unknown>>(settingKey, {}));
     }
 
     private getWatchExcludePatterns(): string[] {
@@ -799,38 +848,49 @@ export class DiffTracker {
         const ig = ignore();
         const watchExcludes = this.getWatchExcludePatterns();
         const basePatterns = [
-            ...this.getDefaultExcludePatterns(),
-            ...this.getVsCodeExcludePatterns(),
+            ...(this.shouldUseBuiltInExcludes() ? this.getDefaultExcludePatterns() : []),
             ...watchExcludes
         ];
         ig.add(basePatterns);
 
-        const gitignoreFiles = await this.getCachedGitignoreFiles(folder);
+        if (this.shouldUseGitIgnoreExcludes()) {
+            const gitignoreFiles = await this.getCachedGitignoreFiles(folder);
 
-        for (const uri of gitignoreFiles) {
-            try {
-                const content = await vscode.workspace.fs.readFile(uri);
-                const text = new TextDecoder('utf-8').decode(content);
-                const relPath = this.toPosixPath(path.relative(folder.uri.fsPath, uri.fsPath));
-                const relDir = path.posix.dirname(relPath);
-                const prefix = relDir === '.' ? '' : `${relDir}/`;
-                this.addGitignorePatterns(ig, text, prefix);
-            } catch {
-                // ignore read errors
+            for (const uri of gitignoreFiles) {
+                try {
+                    const content = await vscode.workspace.fs.readFile(uri);
+                    const text = new TextDecoder('utf-8').decode(content);
+                    const relPath = this.toPosixPath(path.relative(folder.uri.fsPath, uri.fsPath));
+                    const relDir = path.posix.dirname(relPath);
+                    const prefix = relDir === '.' ? '' : `${relDir}/`;
+                    this.addGitignorePatterns(ig, text, prefix);
+                } catch {
+                    // ignore read errors
+                }
             }
-        }
 
-        const infoExcludePath = path.join(folder.uri.fsPath, '.git', 'info', 'exclude');
-        if (fs.existsSync(infoExcludePath)) {
-            try {
-                const text = fs.readFileSync(infoExcludePath, 'utf8');
-                this.addGitignorePatterns(ig, text, '');
-            } catch {
-                // ignore read errors
+            const infoExcludePath = path.join(folder.uri.fsPath, '.git', 'info', 'exclude');
+            if (fs.existsSync(infoExcludePath)) {
+                try {
+                    const text = fs.readFileSync(infoExcludePath, 'utf8');
+                    this.addGitignorePatterns(ig, text, '');
+                } catch {
+                    // ignore read errors
+                }
             }
         }
 
         return ig;
+    }
+
+    private buildVSCodeExcludeMatcher(folder: vscode.WorkspaceFolder): VSCodeExcludeMatcher {
+        const patterns = [
+            ...(this.shouldUseVSCodeExcludeSource(folder, 'files') ? this.getVSCodeExcludePatterns(folder, 'files.exclude') : []),
+            ...(this.shouldUseVSCodeExcludeSource(folder, 'search') ? this.getVSCodeExcludePatterns(folder, 'search.exclude') : []),
+            ...(this.shouldUseVSCodeExcludeSource(folder, 'watcher') ? this.getVSCodeExcludePatterns(folder, 'files.watcherExclude') : [])
+        ];
+        const caseSensitive = process.platform === 'linux';
+        return new VSCodeExcludeMatcher([...new Set(patterns)], caseSensitive);
     }
 
     private async getCachedGitignoreFiles(folder: vscode.WorkspaceFolder): Promise<vscode.Uri[]> {
@@ -928,7 +988,8 @@ export class DiffTracker {
             return { ignored: false, reason: 'Ignore rules not initialized yet' };
         }
 
-        const ignored = matcher.ignores(relPath);
+        const vscodeMatcher = this.vscodeExcludeMatchers.get(targetFolder.uri.fsPath);
+        const ignored = matcher.ignores(relPath) || (vscodeMatcher?.ignores(relPath) ?? false);
         const result = { ignored, reason: ignored ? 'Matched ignore rules' : 'Not ignored' };
         return result;
     }
@@ -951,7 +1012,8 @@ export class DiffTracker {
             return cached;
         }
 
-        const ignored = matcher.ignores(relPath);
+        const vscodeMatcher = this.vscodeExcludeMatchers.get(folder.uri.fsPath);
+        const ignored = matcher.ignores(relPath) || (vscodeMatcher?.ignores(relPath) ?? false);
         this.setIgnoreResultCache(cacheKey, ignored);
         return ignored;
     }
@@ -994,7 +1056,7 @@ export class DiffTracker {
 
             const files = await vscode.workspace.findFiles(
                 new vscode.RelativePattern(folder, '**/*'),
-                new vscode.RelativePattern(folder, '**/{node_modules,.git,out,dist,build,coverage,tmp}/**')
+                this.shouldUseBuiltInExcludes() ? this.getDefaultExcludeFindFilesPattern(folder) : undefined
             );
 
             const candidates = files.filter(uri => {
@@ -1355,7 +1417,7 @@ export class DiffTracker {
             '\n'
         );
         const changes = Diff.diffLines(normalizedOriginal, normalizedCurrent);
-        const fileName = filePath.split('/').pop() || filePath;
+        const fileName = path.basename(filePath);
         const isDeleted = originalContent.length > 0 && currentContent.length === 0;
 
         this.setTrackedChange(filePath, {
@@ -1449,6 +1511,39 @@ export class DiffTracker {
         this.emitTrackChangesEvent({ removedFiles: [filePath] });
 
         return true;
+    }
+
+    public async revertFiles(filePaths: string[]): Promise<number> {
+        const changes = filePaths
+            .map(filePath => this.trackedChanges.get(filePath))
+            .filter((change): change is FileDiff => change !== undefined);
+        if (changes.length === 0) {
+            return 0;
+        }
+
+        const removedFiles: string[] = [];
+        for (const change of changes) {
+            const restored = await this.restoreFileToContent(
+                change.filePath,
+                change.originalContent,
+                { deleteIfMissingInBaseline: !this.baselineExistingFiles.has(change.filePath) }
+            );
+            if (!restored) {
+                continue;
+            }
+
+            this.deleteTrackedChange(change.filePath);
+            this.lineChanges.delete(change.filePath);
+            this.markLineChangesUpdated(change.filePath);
+            this.inlineViews.delete(change.filePath);
+            removedFiles.push(change.filePath);
+        }
+
+        if (removedFiles.length > 0) {
+            this.emitTrackChangesEvent({ removedFiles });
+        }
+
+        return removedFiles.length;
     }
 
     private async restoreFileToContent(
@@ -1739,6 +1834,40 @@ export class DiffTracker {
         });
         this.schedulePersistState();
         return true;
+    }
+
+    public async keepFiles(filePaths: string[]): Promise<number> {
+        const changes = filePaths
+            .map(filePath => this.trackedChanges.get(filePath))
+            .filter((change): change is FileDiff => change !== undefined);
+        if (changes.length === 0) {
+            return 0;
+        }
+
+        const removedFiles: string[] = [];
+        for (const change of changes) {
+            const doc = vscode.workspace.textDocuments.find(textDoc => textDoc.uri.fsPath === change.filePath);
+            const currentContent = doc?.getText() ?? change.currentContent;
+            this.fileSnapshots.set(change.filePath, currentContent);
+            if (change.isDeleted) {
+                this.baselineExistingFiles.delete(change.filePath);
+            } else {
+                this.baselineExistingFiles.add(change.filePath);
+            }
+
+            this.deleteTrackedChange(change.filePath);
+            this.lineChanges.delete(change.filePath);
+            this.markLineChangesUpdated(change.filePath);
+            this.inlineViews.delete(change.filePath);
+            removedFiles.push(change.filePath);
+        }
+
+        this.emitTrackChangesEvent({
+            removedFiles,
+            baselineChanged: true
+        });
+        this.schedulePersistState();
+        return removedFiles.length;
     }
 
     /**

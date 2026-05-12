@@ -13,7 +13,7 @@ Diff Tracker is a VS Code extension that records file changes and provides three
 
 ## Screenshots
 
-💥 **Highlights in 0.6.0: Auto-start recording, persistent review sessions, automation-only tracking, and more flexible WebView opening behavior.**
+**Highlights in 0.6.7: WebView diff overview ruler for faster change navigation.**
 
 | Cursor like WebView Unified | Cursor like WebView Split |
 |:---------------:|:--------------:|
@@ -32,15 +32,24 @@ Diff Tracker is a VS Code extension that records file changes and provides three
 - [New 🚀] Pending, unaccepted changes survive VS Code restarts and are restored from the saved baseline
 - [New 🚀] Automation-only tracking mode for AI/agent or extension-driven edits
 - [New 🚀] Configurable WebView opening position (`current group` or `beside`)
+- [New 🚀] WebView diff overview ruler with clickable change markers and a live viewport indicator
 - [New 🚀] Automatically start recording file changes after the extension is activated
+- [New 🚀] Show workspace-relative file paths in the Change Recording tree
+- [New 🚀] Toggle folder grouping in the Change Recording tree
+- [New 🚀] Group Change Recording tree row icons with clear gaps before Revert and Accept actions
+- [New 🚀] Confirm whole-file revert actions before they run
+- [New 🚀] Accept or revert all tracked changes under a folder from the Change Recording tree
+- [New 🚀] Configure separate safety confirmations for folder accepts and folder reverts
+- [New 🚀] Split VS Code exclude inheritance across `files.exclude`, `search.exclude`, and `files.watcherExclude`
+- [New 🚀] Workspace-relative glob matching for inherited VS Code excludes
 - Activity Bar **Change Recording** tree with file grouping
 - Recording mode (start/stop) with workspace baseline snapshot
 - Workspace-wide file watching (including external file changes)
 - Inline readonly diff view with line and word-level highlights
 - Side-by-side diff (`Original ↔ Current`) via built-in VS Code diff
-- Cursor-like WebView diff (Split/Unified, Wrap, Expand, Keep All, Reject All)
+- Cursor-like WebView diff (Split/Unified, Wrap, Expand, Keep All, Reject All, overview ruler)
 - Block-wise actions: Undo/Keep per change block
-- File-level actions: Revert file, Revert all files, Keep all changes in file
+- File-level and folder-level actions: Revert file, Revert all files, Keep all changes in file, Accept/Revert folder changes, with separated tree row action icons
 - Deleted-line badge, CodeLens actions, and hover details
 - Settings panel + Watch Ignore editor (`.gitignore` style patterns)
 
@@ -54,8 +63,8 @@ Diff Tracker is a VS Code extension that records file changes and provides three
    - Inline Diff (active file)
    - Side-by-Side Diff
    - WebView Diff
-6. In WebView Diff, use block-level **Undo/Keep** or file-level **Keep All/Reject All**.
-7. Use **Revert File** / **Revert All Changes** as needed.
+6. In WebView Diff, use the overview ruler to jump between change blocks, then use block-level **Undo/Keep** or file-level **Keep All/Reject All**.
+7. Use **Revert File**, **Revert All Changes**, or folder-level **Accept/Revert** actions as needed.
 8. Stop recording when done.
 
 ## How It Works
@@ -98,10 +107,26 @@ This extension provides the following settings:
 | `diffTracker.highlightModifiedLines` | `true` | Highlight modified lines with blue background |
 | `diffTracker.highlightWordChanges` | `true` | Highlight word-level changes within modified lines |
 | `diffTracker.openWebviewBeside` | `false` | Open Webview diff in a side editor group instead of the current editor group |
+| `diffTracker.showFullFilePaths` | `false` | Show project-relative file paths in the Change Recording tree instead of only the file name |
+| `diffTracker.showFolders` | `true` | Show folders in the Change Recording tree |
+| `diffTracker.confirmReversions` | `true` | Show a confirmation dialog before reverting all changes or reverting all changes in a file |
+| `diffTracker.confirmFolderReversions` | `true` | Show a confirmation dialog before reverting all changes under a folder |
+| `diffTracker.confirmFolderAccepts` | `true` | Show a confirmation dialog before accepting all changes under a folder |
+| `diffTracker.useGitIgnoreExcludes` | `true` | Apply ignore rules from `.gitignore` files and `.git/info/exclude` |
+| `diffTracker.useBuiltInExcludes` | `true` | Apply built-in ignore rules for common folders like `.git`, `node_modules`, `dist`, and `coverage` |
+| `diffTracker.useVSCodeExcludes` | `true` | Deprecated compatibility setting for VS Code exclude inheritance |
+| `diffTracker.useVSCodeFilesExcludes` | `true` | Apply VS Code Explorer exclude settings from `files.exclude`. Conditional object rules are ignored. |
+| `diffTracker.useVSCodeSearchExcludes` | `false` | Apply VS Code search exclude settings from `search.exclude`. Conditional object rules are ignored. |
+| `diffTracker.useVSCodeWatcherExcludes` | `false` | Apply VS Code watcher exclude settings from `files.watcherExclude`. Conditional object rules are ignored. |
 | `diffTracker.watchExclude` | `[]` | Additional watch ignore patterns (`.gitignore` style) |
+| `diffTracker.onlyTrackVSCodeChanges` | `false` | Deprecated alias for automation-only tracking |
 | `diffTracker.onlyTrackAutomatedChanges` | `false` | Ignore manual typing in VS Code. External CLI/tool edits are still tracked, and VS Code extension edits can be tracked when they open an automation session first |
 
-You can toggle display/highlight settings in the sidebar **Settings** panel, and edit watch ignore patterns via **Edit Watch Ignores**.
+You can toggle display/highlight/ignore settings in the sidebar **Settings** panel, and edit watch ignore patterns via **Edit Watch Ignores**.
+
+VS Code exclude inheritance is split across `files.exclude`, `search.exclude`, and `files.watcherExclude`. Diff Tracker applies boolean glob rules from those settings and ignores conditional object rules such as `{ "when": "$(basename).ts" }`.
+
+`diffTracker.useVSCodeExcludes` remains as a deprecated compatibility setting.
 
 When `diffTracker.openWebviewBeside` is enabled, Webview diff opens in a side editor group. By default it opens in the current editor group.
 
@@ -202,6 +227,34 @@ try {
 - Add `diffTracker.onlyTrackAutomatedChanges` plus `diffTracker.beginAutomationSession` / `diffTracker.endAutomationSession` for automation-aware tracking workflows
 - Add `diffTracker.openWebviewBeside`, expose the new recording/display toggles in the settings tree, and make WebView diff open behavior more configurable
 - Start recording automatically after activation and restore decorations/tree state when a previous session is resumed
+
+### 0.6.2
+- Add `CompileToVSIX.bat` for packaging the extension
+- Add `diffTracker.showFullFilePaths` for project-relative file paths in the changes tree
+- Add `diffTracker.confirmReversions` to confirm whole-file revert actions
+- Handle cancelled revert confirmations cleanly in the webview
+
+### 0.6.3
+- Split VS Code exclude inheritance into separate settings for `files.exclude`, `search.exclude`, and `files.watcherExclude`
+- Add workspace-relative glob matching for inherited VS Code excludes
+- Update the settings UI and docs to reflect the new exclude settings and their conditional-rule limits
+
+### 0.6.4
+- Add Accept Folder Changes and Revert Folder Changes actions to folder rows in the Change Recording tree
+- Add recursive folder accept/revert handling for all tracked files under the selected folder
+- Add `diffTracker.confirmFolderReversions` and `diffTracker.confirmFolderAccepts` safety settings, both enabled by default
+
+### 0.6.5
+- Add `diffTracker.showFolders` to toggle folder grouping in the Change Recording tree
+
+### 0.6.6
+- Group Change Recording tree row icons with icon-sized gaps before Revert and Accept actions
+- Add hidden no-op spacer commands and a transparent spacer icon for VS Code tree inline actions
+
+### 0.6.7
+- Add a WebView diff overview ruler beside the diff content
+- Show clickable change markers for added, deleted, and modified blocks
+- Track the visible scroll viewport in the overview ruler to speed up navigation through large diffs
 
 ## License
 

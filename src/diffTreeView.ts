@@ -28,6 +28,8 @@ export class DiffTreeDataProvider implements vscode.TreeDataProvider<TreeItem>, 
         // Root level - show files
         if (!element) {
             const changes = this.diffTracker.getTrackedChanges();
+            const config = vscode.workspace.getConfiguration('diffTracker');
+            const showFolders = config.get<boolean>('showFolders', true);
             items.push(this.createRecordingItem());
 
             if (changes.length === 0) {
@@ -61,6 +63,11 @@ export class DiffTreeDataProvider implements vscode.TreeDataProvider<TreeItem>, 
             actionsHeader.iconPath = new vscode.ThemeIcon('tools');
             actionsHeader.description = '';
             items.push(actionsHeader);
+
+            if (!showFolders) {
+                items.push(...this.createSortedFileItems(changes));
+                return Promise.resolve(items);
+            }
 
             const rootNode: DirNode = {
                 name: '',
@@ -111,7 +118,8 @@ export class DiffTreeDataProvider implements vscode.TreeDataProvider<TreeItem>, 
     }
 
     private createFileItem(fileDiff: FileDiff): TreeItem {
-        const displayName = fileDiff.isDeleted ? `${fileDiff.fileName} [Deleted]` : fileDiff.fileName;
+        const displayPath = this.getFileDisplayPath(fileDiff);
+        const displayName = fileDiff.isDeleted ? `${displayPath} [Deleted]` : displayPath;
         const item = new TreeItem(displayName, vscode.TreeItemCollapsibleState.None);
         item.filePath = fileDiff.filePath;
         item.isDeleted = fileDiff.isDeleted;
@@ -132,6 +140,23 @@ export class DiffTreeDataProvider implements vscode.TreeDataProvider<TreeItem>, 
         item.contextValue = 'changedFile';
 
         return item;
+    }
+
+    private getFileDisplayPath(fileDiff: FileDiff): string {
+        const config = vscode.workspace.getConfiguration('diffTracker');
+        const showFullFilePaths = config.get<boolean>('showFullFilePaths', false);
+
+        if (showFullFilePaths) {
+            return this.toWorkspaceRelative(fileDiff.filePath);
+        }
+
+        return path.basename(fileDiff.filePath);
+    }
+
+    private createSortedFileItems(files: FileDiff[]): TreeItem[] {
+        return [...files]
+            .sort((a, b) => a.fileName.localeCompare(b.fileName) || a.filePath.localeCompare(b.filePath))
+            .map(file => this.createFileItem(file));
     }
 
     private toWorkspaceRelative(filePath: string): string {
@@ -192,16 +217,13 @@ export class DiffTreeDataProvider implements vscode.TreeDataProvider<TreeItem>, 
             const dirItem = new TreeItem(childNode.name, vscode.TreeItemCollapsibleState.Expanded);
             dirItem.iconPath = new vscode.ThemeIcon('folder');
             dirItem.children = this.buildTreeItemsFromNode(childNode);
-            dirItem.description = `${this.countFilesInNode(childNode)} file(s)`;
+            dirItem.folderFilePaths = this.getFilePathsInNode(childNode);
+            dirItem.description = `${dirItem.folderFilePaths.length} file(s)`;
+            dirItem.contextValue = 'changedFolder';
             items.push(dirItem);
         }
 
-        const sortedFiles = [...node.files].sort((a, b) =>
-            a.fileName.localeCompare(b.fileName) || a.filePath.localeCompare(b.filePath)
-        );
-        for (const file of sortedFiles) {
-            items.push(this.createFileItem(file));
-        }
+        items.push(...this.createSortedFileItems(node.files));
 
         if (isRoot) {
             return items;
@@ -210,12 +232,12 @@ export class DiffTreeDataProvider implements vscode.TreeDataProvider<TreeItem>, 
         return items;
     }
 
-    private countFilesInNode(node: DirNode): number {
-        let count = node.files.length;
+    private getFilePathsInNode(node: DirNode): string[] {
+        const filePaths = node.files.map(file => file.filePath);
         for (const childNode of node.childrenDirs.values()) {
-            count += this.countFilesInNode(childNode);
+            filePaths.push(...this.getFilePathsInNode(childNode));
         }
-        return count;
+        return filePaths;
     }
 
     public dispose(): void {
@@ -227,6 +249,7 @@ export class DiffTreeDataProvider implements vscode.TreeDataProvider<TreeItem>, 
 class TreeItem extends vscode.TreeItem {
     public children?: TreeItem[];
     public filePath?: string;
+    public folderFilePaths?: string[];
     public isDeleted?: boolean;
 
     constructor(

@@ -53,7 +53,7 @@ type SettingGroup = {
     id: string;
     label: string;
     icon?: string;
-    items: Array<{ key: string; label: string }>;
+    items: Array<{ key: string; label: string; defaultValue?: boolean }>;
 };
 
 /**
@@ -63,6 +63,7 @@ export class SettingsTreeDataProvider implements vscode.TreeDataProvider<Setting
     private _onDidChangeTreeData = new vscode.EventEmitter<SettingItem | SettingGroupItem | SettingActionItem | undefined>();
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
     private configurationChangeDisposable: vscode.Disposable;
+    private registeredSettingKeys: Set<string>;
 
     private settings: SettingGroup[] = [
         {
@@ -70,6 +71,8 @@ export class SettingsTreeDataProvider implements vscode.TreeDataProvider<Setting
             label: 'Display',
             items: [
                 { key: 'openWebviewBeside', label: 'Beside View' },
+                { key: 'showFullFilePaths', label: 'Show Full File Paths' },
+                { key: 'showFolders', label: 'Show Folders' },
                 { key: 'showDeletedLinesBadge', label: 'Deleted line badge' },
                 { key: 'showCodeLens', label: 'CodeLens actions' }
             ]
@@ -84,10 +87,30 @@ export class SettingsTreeDataProvider implements vscode.TreeDataProvider<Setting
             ]
         },
         {
+            id: 'ignores',
+            label: 'Ignores',
+            items: [
+                { key: 'useGitIgnoreExcludes', label: 'Use .gitignore rules' },
+                { key: 'useBuiltInExcludes', label: 'Use built-in ignores' },
+                { key: 'useVSCodeFilesExcludes', label: 'Use VS Code files.exclude' },
+                { key: 'useVSCodeSearchExcludes', label: 'Use VS Code search.exclude', defaultValue: false },
+                { key: 'useVSCodeWatcherExcludes', label: 'Use VS Code watcherExclude', defaultValue: false }
+            ]
+        },
+        {
             id: 'recording',
             label: 'Recording',
             items: [
                 { key: 'onlyTrackAutomatedChanges', label: 'Vibe Coding Only' }
+            ]
+        },
+        {
+            id: 'safety',
+            label: 'Safety',
+            items: [
+                { key: 'confirmReversions', label: 'Confirm reversions' },
+                { key: 'confirmFolderReversions', label: 'Confirm folder reversions' },
+                { key: 'confirmFolderAccepts', label: 'Confirm folder accepts' }
             ]
         },
         {
@@ -97,7 +120,9 @@ export class SettingsTreeDataProvider implements vscode.TreeDataProvider<Setting
         }
     ];
 
-    constructor() {
+    constructor(extensionPackageJSON?: any) {
+        this.registeredSettingKeys = this.getRegisteredSettingKeys(extensionPackageJSON);
+
         // Refresh when settings change
         this.configurationChangeDisposable = vscode.workspace.onDidChangeConfiguration(e => {
             if (e.affectsConfiguration('diffTracker')) {
@@ -159,15 +184,15 @@ export class SettingsTreeDataProvider implements vscode.TreeDataProvider<Setting
                     },
                     'preview'
                 ),
-                ...group.items.map(setting => {
-                    const value = config.get<boolean>(setting.key, true);
+                ...group.items.filter(setting => this.isRegisteredSetting(setting.key)).map(setting => {
+                    const value = config.get<boolean>(setting.key, setting.defaultValue ?? true);
                     return new SettingItem(setting.key, setting.label, value);
                 })
             ];
         }
 
-        return group.items.map(setting => {
-            const value = config.get<boolean>(setting.key, true);
+        return group.items.filter(setting => this.isRegisteredSetting(setting.key)).map(setting => {
+            const value = config.get<boolean>(setting.key, setting.defaultValue ?? true);
             return new SettingItem(setting.key, setting.label, value);
         });
     }
@@ -176,10 +201,39 @@ export class SettingsTreeDataProvider implements vscode.TreeDataProvider<Setting
      * Toggle a setting
      */
     public async toggleSetting(settingKey: string): Promise<void> {
+        if (!this.isRegisteredSetting(settingKey)) {
+            vscode.window.showWarningMessage(`Diff Tracker setting diffTracker.${settingKey} is not registered by this extension version.`);
+            return;
+        }
+
         const config = vscode.workspace.getConfiguration('diffTracker');
-        const currentValue = config.get<boolean>(settingKey, true);
+        const setting = this.settings.flatMap(group => group.items).find(item => item.key === settingKey);
+        const currentValue = config.get<boolean>(settingKey, setting?.defaultValue ?? true);
         await config.update(settingKey, !currentValue, vscode.ConfigurationTarget.Global);
         this.refresh();
+    }
+
+    private isRegisteredSetting(settingKey: string): boolean {
+        return this.registeredSettingKeys.size === 0 || this.registeredSettingKeys.has(`diffTracker.${settingKey}`);
+    }
+
+    private getRegisteredSettingKeys(extensionPackageJSON?: any): Set<string> {
+        const keys = new Set<string>();
+        const configuration = extensionPackageJSON?.contributes?.configuration;
+        const configurations = Array.isArray(configuration) ? configuration : [configuration];
+
+        for (const config of configurations) {
+            const properties = config?.properties;
+            if (!properties || typeof properties !== 'object') {
+                continue;
+            }
+
+            for (const key of Object.keys(properties)) {
+                keys.add(key);
+            }
+        }
+
+        return keys;
     }
 
     public dispose(): void {

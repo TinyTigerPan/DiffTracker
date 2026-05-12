@@ -117,10 +117,15 @@ npm run package
 | `diffTracker.highlightWordChanges` | `true` | 是否高亮修改行中的词级差异 |
 | `diffTracker.defaultOpenMode` | `webview` | 点击变更文件时的默认打开方式 |
 | `diffTracker.openWebviewBeside` | `false` | 是否将 WebView Diff 打开到旁边的编辑器分组 |
+| `diffTracker.useGitIgnoreExcludes` | `true` | 是否应用来自 `.gitignore` 与 `.git/info/exclude` 的忽略规则 |
+| `diffTracker.useBuiltInExcludes` | `true` | 是否应用内置忽略规则，例如 `.git`、`node_modules`、`dist`、`coverage` |
+| `diffTracker.useVSCodeFilesExcludes` | `true` | 是否应用来自 `files.exclude` 的 VS Code Explorer 排除设置 |
+| `diffTracker.useVSCodeSearchExcludes` | `false` | 是否应用来自 `search.exclude` 的 VS Code 搜索排除设置 |
+| `diffTracker.useVSCodeWatcherExcludes` | `false` | 是否应用来自 `files.watcherExclude` 的 VS Code 监听排除设置 |
 | `diffTracker.watchExclude` | `[]` | 额外的监听忽略规则，使用 `.gitignore` 风格 |
 | `diffTracker.onlyTrackAutomatedChanges` | `false` | 只记录自动化产生的改动，忽略手动键入 |
 
-你可以在侧边栏的 **Settings** 面板中直接切换大部分显示类设置，也可以通过 `Edit Watch Ignores` 编辑忽略规则。
+你可以在侧边栏的 **Settings** 面板中直接切换显示类与忽略规则相关设置，也可以通过 `Edit Watch Ignores` 编辑忽略规则。
 
 ## 默认打开模式
 

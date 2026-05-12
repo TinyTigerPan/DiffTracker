@@ -2,13 +2,13 @@
   "name": "diff-tracker",
   "displayName": "Diff Tracker",
   "description": "Visual file diff tracking - record and display changes in real-time",
-  "version": "0.6.0",
-  "publisher": "TinyTigerPan",
-  "author": "TinyTigerPan (Fork from Wizyoung)",
+  "version": "0.6.7",
+  "publisher": "virtushda",
+  "author": "virtushda (fork from TinyTigerPan (Fork from Wizyoung))",
   "icon": "resources/marketplace-icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/TinyTigerPan/DiffTracker.git"
+    "url": "https://github.com/virtushda/DiffTracker.git"
   },
   "engines": {
     "vscode": "^1.80.0"
@@ -99,6 +99,62 @@
           "default": false,
           "description": "When opening Webview diff, place it in a side editor group instead of the current one"
         },
+        "diffTracker.showFullFilePaths": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show project-relative file paths in the Change Recording tree instead of only the file name"
+        },
+        "diffTracker.showFolders": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show folders in the Change Recording tree"
+        },
+        "diffTracker.confirmReversions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a confirmation dialog before reverting all changes or reverting all changes in a file"
+        },
+        "diffTracker.confirmFolderReversions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a confirmation dialog before reverting all changes under a folder"
+        },
+        "diffTracker.confirmFolderAccepts": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a confirmation dialog before accepting all changes under a folder"
+        },
+        "diffTracker.useGitIgnoreExcludes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Apply ignore rules from .gitignore files and .git/info/exclude"
+        },
+        "diffTracker.useBuiltInExcludes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Apply built-in ignore rules for common folders like .git, node_modules, dist, and coverage"
+        },
+        "diffTracker.useVSCodeExcludes": {
+          "type": "boolean",
+          "default": true,
+          "deprecationMessage": "Deprecated. Use diffTracker.useVSCodeFilesExcludes, diffTracker.useVSCodeSearchExcludes, and diffTracker.useVSCodeWatcherExcludes instead.",
+          "description": "Deprecated compatibility setting for VS Code exclude inheritance"
+        },
+        "diffTracker.useVSCodeFilesExcludes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Apply VS Code Explorer exclude settings from files.exclude. Conditional object rules are ignored."
+        },
+        "diffTracker.useVSCodeSearchExcludes": {
+          "type": "boolean",
+          "default": false,
+          "description": "Apply VS Code search exclude settings from search.exclude. Conditional object rules are ignored."
+        },
+        "diffTracker.useVSCodeWatcherExcludes": {
+          "type": "boolean",
+          "default": false,
+          "description": "Apply VS Code watcher exclude settings from files.watcherExclude. Conditional object rules are ignored."
+        },
         "diffTracker.watchExclude": {
           "type": "array",
           "default": [],
@@ -158,6 +214,18 @@
       {
         "command": "diffTracker.keepAllChanges",
         "title": "Accept All Changes",
+        "category": "Diff Tracker",
+        "icon": "$(check)"
+      },
+      {
+        "command": "diffTracker.revertFolderChanges",
+        "title": "Revert Folder Changes",
+        "category": "Diff Tracker",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "diffTracker.keepFolderChanges",
+        "title": "Accept Folder Changes",
         "category": "Diff Tracker",
         "icon": "$(check)"
       },
@@ -229,8 +297,9 @@
       },
       {
         "command": "diffTracker.keepAllBlocksInFile",
-        "title": "Keep All Changes in File",
-        "category": "Diff Tracker"
+        "title": "Accept All Changes in File",
+        "category": "Diff Tracker",
+        "icon": "$(check)"
       },
       {
         "command": "diffTracker.showWebviewDiff",
@@ -258,6 +327,24 @@
         "command": "diffTracker.editWatchExcludes",
         "title": "Edit Watch Ignores",
         "category": "Diff Tracker"
+      },
+      {
+        "command": "diffTracker.treeActionSpacerBeforeRevert",
+        "title": " ",
+        "category": "Diff Tracker",
+        "icon": {
+          "dark": "resources/tree-action-spacer.svg",
+          "light": "resources/tree-action-spacer.svg"
+        }
+      },
+      {
+        "command": "diffTracker.treeActionSpacerBeforeAccept",
+        "title": " ",
+        "category": "Diff Tracker",
+        "icon": {
+          "dark": "resources/tree-action-spacer.svg",
+          "light": "resources/tree-action-spacer.svg"
+        }
       }
     ],
     "menus": {
@@ -265,22 +352,62 @@
         {
           "command": "diffTracker.openOriginalFile",
           "when": "view == diffTracker.changesView && viewItem == changedFile",
-          "group": "inline"
+          "group": "inline@1"
         },
         {
           "command": "diffTracker.showSideBySideDiff",
           "when": "view == diffTracker.changesView && viewItem == changedFile",
-          "group": "inline"
-        },
-        {
-          "command": "diffTracker.revertFile",
-          "when": "view == diffTracker.changesView && viewItem == changedFile",
-          "group": "inline"
+          "group": "inline@2"
         },
         {
           "command": "diffTracker.showWebviewDiff",
           "when": "view == diffTracker.changesView && viewItem == changedFile",
-          "group": "inline"
+          "group": "inline@3"
+        },
+        {
+          "command": "diffTracker.treeActionSpacerBeforeRevert",
+          "when": "view == diffTracker.changesView && viewItem == changedFile",
+          "group": "inline@4"
+        },
+        {
+          "command": "diffTracker.revertFile",
+          "when": "view == diffTracker.changesView && viewItem == changedFile",
+          "group": "inline@5"
+        },
+        {
+          "command": "diffTracker.treeActionSpacerBeforeAccept",
+          "when": "view == diffTracker.changesView && viewItem == changedFile",
+          "group": "inline@6"
+        },
+        {
+          "command": "diffTracker.keepAllBlocksInFile",
+          "when": "view == diffTracker.changesView && viewItem == changedFile",
+          "group": "inline@7"
+        },
+        {
+          "command": "diffTracker.revertFolderChanges",
+          "when": "view == diffTracker.changesView && viewItem == changedFolder",
+          "group": "inline@1"
+        },
+        {
+          "command": "diffTracker.treeActionSpacerBeforeAccept",
+          "when": "view == diffTracker.changesView && viewItem == changedFolder",
+          "group": "inline@2"
+        },
+        {
+          "command": "diffTracker.keepFolderChanges",
+          "when": "view == diffTracker.changesView && viewItem == changedFolder",
+          "group": "inline@3"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "diffTracker.treeActionSpacerBeforeRevert",
+          "when": "false"
+        },
+        {
+          "command": "diffTracker.treeActionSpacerBeforeAccept",
+          "when": "false"
         }
       ],
       "explorer/context": [
@@ -341,6 +468,7 @@
     "pretest": "npm run compile",
     "test:webview-anchors": "node test/webview-annotation-mapping.mjs",
     "test:similarity-pairing": "node test/similarity-pairing.mjs",
+    "test:vscode-excludes": "node test/vscode-exclude-matcher.mjs",
     "lint": "eslint src --ext ts",
     "package": "vsce package"
   },
