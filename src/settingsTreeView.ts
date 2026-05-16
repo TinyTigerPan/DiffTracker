@@ -71,6 +71,7 @@ export class SettingsTreeDataProvider implements vscode.TreeDataProvider<Setting
             label: 'Display',
             items: [
                 { key: 'openWebviewBeside', label: 'Beside View' },
+                { key: 'webviewDefaultSplit', label: 'Webview Default Split' },
                 { key: 'showFullFilePaths', label: 'Show Full File Paths' },
                 { key: 'showFolders', label: 'Show Folders' },
                 { key: 'showDeletedLinesBadge', label: 'Deleted line badge' },

@@ -60,6 +60,10 @@ export class DiffCodeLensProvider implements vscode.CodeLensProvider {
             return [];
         }
 
+        if (this.diffTracker.isDocumentOutOfSyncWithTrackedChange(document)) {
+            return [];
+        }
+
         const cacheKey = this.getCacheKey(document);
         const cached = this.lensCache.get(cacheKey);
         if (cached) {

@@ -56,7 +56,7 @@ export class OriginalContentProvider implements vscode.TextDocumentContentProvid
 
         // Get original content from snapshots
         const originalContent = this.diffTracker.getOriginalContent(filePath);
-        if (originalContent) {
+        if (originalContent !== undefined) {
             return originalContent;
         }
 

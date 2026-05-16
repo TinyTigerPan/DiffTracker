@@ -72,6 +72,20 @@ interface AutomationSession {
     timeout: NodeJS.Timeout;
 }
 
+interface PendingDocumentChange {
+    timer: NodeJS.Timeout;
+    sequence: number;
+    document: vscode.TextDocument;
+    content: string;
+}
+
+interface PendingExternalChange {
+    timer: NodeJS.Timeout;
+    sequence: number;
+    uri: vscode.Uri;
+    operation: 'change' | 'create' | 'delete';
+}
+
 interface PersistedTrackerState {
     version: 1;
     isRecording: boolean;
@@ -107,9 +121,9 @@ export class DiffTracker {
     private snapshotInitialized = false;
     private baselineBuilding = false;
     private pendingExternalChanges = new Set<string>();
-    private externalChangeTimers = new Map<string, NodeJS.Timeout>();
-    private documentChangeTimers = new Map<string, NodeJS.Timeout>();
-    private watcherSuppressionTimers = new Map<string, NodeJS.Timeout>();
+    private pendingExternalChangeEntries = new Map<string, PendingExternalChange>();
+    private pendingDocumentChangeEntries = new Map<string, PendingDocumentChange>();
+    private nextPendingChangeSequence = 1;
     private automationSessions = new Map<string, AutomationSession>();
     private automationFileRefCounts = new Map<string, number>();
     private automationGlobalRefCount = 0;
@@ -183,7 +197,6 @@ export class DiffTracker {
 
         this.clearExternalChangeTimers();
         this.clearDocumentChangeTimers();
-        this.clearWatcherSuppressionTimers();
         this.clearAutomationSessions();
         this.disposeFileWatchers();
 
@@ -227,7 +240,6 @@ export class DiffTracker {
         const removedFiles = Array.from(this.trackedChanges.keys());
         this.isRecording = true;
         this.clearAutomationSessions();
-        this.clearWatcherSuppressionTimers();
         this.fileSnapshots.clear();
         this.baselineExistingFiles.clear();
         this.clearTrackedChanges();
@@ -262,7 +274,6 @@ export class DiffTracker {
         this.clearAutomationSessions();
         this.clearExternalChangeTimers();
         this.clearDocumentChangeTimers();
-        this.clearWatcherSuppressionTimers();
         this.disposeFileWatchers();
         this.resetChangeBlocksCaches();
         this.schedulePersistState();
@@ -379,18 +390,13 @@ export class DiffTracker {
     }
 
     private clearExternalChangeTimers(): void {
-        this.externalChangeTimers.forEach(timer => clearTimeout(timer));
-        this.externalChangeTimers.clear();
+        this.pendingExternalChangeEntries.forEach(entry => clearTimeout(entry.timer));
+        this.pendingExternalChangeEntries.clear();
     }
 
     private clearDocumentChangeTimers(): void {
-        this.documentChangeTimers.forEach(timer => clearTimeout(timer));
-        this.documentChangeTimers.clear();
-    }
-
-    private clearWatcherSuppressionTimers(): void {
-        this.watcherSuppressionTimers.forEach(timer => clearTimeout(timer));
-        this.watcherSuppressionTimers.clear();
+        this.pendingDocumentChangeEntries.forEach(entry => clearTimeout(entry.timer));
+        this.pendingDocumentChangeEntries.clear();
     }
 
     private getPersistedStateUri(): vscode.Uri | undefined {
@@ -535,33 +541,16 @@ export class DiffTracker {
         [...this.automationSessions.keys()].forEach(sessionId => this.endAutomationSession(sessionId));
     }
 
-    private scheduleWatcherSuppression(filePath: string, durationMs = 1500): void {
-        const existingTimer = this.watcherSuppressionTimers.get(filePath);
-        if (existingTimer) {
-            clearTimeout(existingTimer);
-        }
-
-        const timer = setTimeout(() => {
-            this.watcherSuppressionTimers.delete(filePath);
-        }, durationMs);
-
-        this.watcherSuppressionTimers.set(filePath, timer);
-    }
-
-    private shouldSuppressWatcherEvent(filePath: string): boolean {
-        return this.watcherSuppressionTimers.has(filePath);
-    }
-
     private onWillSaveDocument(event: vscode.TextDocumentWillSaveEvent): void {
-        this.suppressWatcherForVsCodeSave(event.document);
+        this.captureSnapshotBeforeDocumentSave(event.document);
     }
 
     private onDidSaveDocument(doc: vscode.TextDocument): void {
-        this.suppressWatcherForVsCodeSave(doc);
+        this.trackSavedDocument(doc);
     }
 
-    private suppressWatcherForVsCodeSave(doc: vscode.TextDocument): void {
-        if (!this.shouldTrackOnlyAutomatedChanges()) {
+    private captureSnapshotBeforeDocumentSave(doc: vscode.TextDocument): void {
+        if (!this.isRecording) {
             return;
         }
 
@@ -569,7 +558,47 @@ export class DiffTracker {
             return;
         }
 
-        this.scheduleWatcherSuppression(doc.uri.fsPath);
+        const filePath = doc.uri.fsPath;
+        if (this.isPathIgnored(doc.uri)) {
+            return;
+        }
+
+        if (this.fileSnapshots.has(filePath)) {
+            return;
+        }
+
+        try {
+            const originalContent = fs.readFileSync(filePath, 'utf8');
+            this.fileSnapshots.set(filePath, originalContent);
+            this.baselineExistingFiles.add(filePath);
+        } catch {
+            this.fileSnapshots.set(filePath, '');
+            this.baselineExistingFiles.delete(filePath);
+        }
+
+        this.schedulePersistState();
+    }
+
+    private trackSavedDocument(doc: vscode.TextDocument): void {
+        if (!this.isRecording) {
+            return;
+        }
+
+        if (doc.uri.scheme !== 'file') {
+            return;
+        }
+
+        const filePath = doc.uri.fsPath;
+        if (this.isPathIgnored(doc.uri)) {
+            return;
+        }
+
+        if (!this.fileSnapshots.has(filePath)) {
+            this.fileSnapshots.set(filePath, '');
+            this.schedulePersistState();
+        }
+
+        this.updateTrackedDiff(filePath, doc.getText());
     }
 
     private normalizeAutomationFilePath(value: unknown): string | undefined {
@@ -1024,10 +1053,7 @@ export class DiffTracker {
         for (const filePath of this.trackedChanges.keys()) {
             const uri = vscode.Uri.file(filePath);
             if (this.isPathIgnored(uri)) {
-                this.deleteTrackedChange(filePath);
-                this.lineChanges.delete(filePath);
-                this.markLineChangesUpdated(filePath);
-                this.inlineViews.delete(filePath);
+                this.clearTrackedFileState(filePath);
                 removedFiles.push(filePath);
             }
         }
@@ -1084,6 +1110,9 @@ export class DiffTracker {
                     }
                     const text = await this.readFileSnapshot(uri);
                     if (text === null) {
+                        return;
+                    }
+                    if (this.fileSnapshots.has(uri.fsPath)) {
                         return;
                     }
                     this.fileSnapshots.set(uri.fsPath, text);
@@ -1267,37 +1296,12 @@ export class DiffTracker {
         }
 
         const filePath = uri.fsPath;
-        if (this.shouldTrackOnlyAutomatedChanges() && this.shouldSuppressWatcherEvent(filePath)) {
-            return;
-        }
-
-        const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === filePath);
-        if (doc && doc.isDirty) {
-            return;
-        }
-
         if (!this.fileSnapshots.has(filePath) && !this.snapshotInitialized) {
             this.pendingExternalChanges.add(filePath);
             return;
         }
 
-        const existingTimer = this.externalChangeTimers.get(filePath);
-        if (existingTimer) {
-            clearTimeout(existingTimer);
-        }
-
-        const timer = setTimeout(() => {
-            this.externalChangeTimers.delete(filePath);
-            if (!this.isRecording || !this.externalWatcherEnabled) {
-                return;
-            }
-            if (this.isPathIgnored(uri)) {
-                return;
-            }
-            this.readFileAndUpdate(filePath, uri).catch(() => undefined);
-        }, 120);
-
-        this.externalChangeTimers.set(filePath, timer);
+        this.schedulePendingExternalChange(uri, 'change');
     }
 
     private onDocumentOpened(doc: vscode.TextDocument): void {
@@ -1317,14 +1321,37 @@ export class DiffTracker {
             return;
         }
 
-        const filePath = uri.fsPath;
+        if (!this.fileSnapshots.has(uri.fsPath)) {
+            this.fileSnapshots.set(uri.fsPath, '');
+            this.baselineExistingFiles.delete(uri.fsPath);
+            this.schedulePersistState();
+        }
+
+        this.schedulePendingExternalChange(uri, 'create');
+    }
+
+    private async processExternalFileCreated(filePath: string, uri: vscode.Uri): Promise<void> {
         const text = await this.readFileSnapshot(uri);
         if (text === null) {
-            this.fileSnapshots.delete(filePath);
-            this.baselineExistingFiles.delete(filePath);
-            this.schedulePersistState();
+            const hadTrackedState = this.clearTrackedFileState(filePath);
+            let baselineChanged = false;
+
+            if (!this.baselineExistingFiles.has(filePath) && this.fileSnapshots.get(filePath) === '') {
+                this.fileSnapshots.delete(filePath);
+                this.baselineExistingFiles.delete(filePath);
+                this.schedulePersistState();
+                baselineChanged = true;
+            }
+
+            if (hadTrackedState || baselineChanged) {
+                this.emitTrackChangesEvent({
+                    removedFiles: [filePath],
+                    baselineChanged
+                });
+            }
             return;
         }
+
         if (!this.fileSnapshots.has(filePath)) {
             this.fileSnapshots.set(filePath, '');
             this.schedulePersistState();
@@ -1345,13 +1372,58 @@ export class DiffTracker {
             return;
         }
 
-        const filePath = uri.fsPath;
-        const originalContent = this.fileSnapshots.get(filePath);
-        if (originalContent === undefined) {
+        if (!this.fileSnapshots.has(uri.fsPath)) {
             return;
         }
 
-        this.updateTrackedDiff(filePath, '');
+        this.schedulePendingExternalChange(uri, 'delete');
+    }
+
+    private processExternalFileDeleted(filePath: string): void {
+        if (!this.fileSnapshots.has(filePath)) {
+            return;
+        }
+
+        const removesNewFileSnapshot = !this.baselineExistingFiles.has(filePath);
+        const hadTrackedState = this.hasTrackedFileState(filePath);
+        this.updateTrackedDiff(filePath, '', { baselineChanged: removesNewFileSnapshot });
+        if (removesNewFileSnapshot && !this.trackedChanges.has(filePath)) {
+            this.fileSnapshots.delete(filePath);
+            this.schedulePersistState();
+            if (!hadTrackedState) {
+                this.emitTrackChangesEvent({
+                    removedFiles: [filePath],
+                    baselineChanged: true
+                });
+            }
+        }
+    }
+
+    private schedulePendingExternalChange(uri: vscode.Uri, operation: PendingExternalChange['operation']): void {
+        const filePath = uri.fsPath;
+        const existingEntry = this.pendingExternalChangeEntries.get(filePath);
+        if (existingEntry) {
+            clearTimeout(existingEntry.timer);
+        }
+
+        const sequence = this.nextPendingChangeSequence++;
+        let pendingChange!: PendingExternalChange;
+        const timer = setTimeout(() => {
+            if (this.pendingExternalChangeEntries.get(filePath) !== pendingChange) {
+                return;
+            }
+
+            this.pendingExternalChangeEntries.delete(filePath);
+            this.processPendingExternalChangeEntry(filePath, pendingChange).catch(() => undefined);
+        }, 120);
+
+        pendingChange = {
+            timer,
+            sequence,
+            uri,
+            operation
+        };
+        this.pendingExternalChangeEntries.set(filePath, pendingChange);
     }
 
     private async readFileAndUpdate(filePath: string, uri: vscode.Uri): Promise<void> {
@@ -1359,15 +1431,80 @@ export class DiffTracker {
         if (text !== null) {
             this.updateTrackedDiff(filePath, text);
         } else {
-            const hadTracked = this.trackedChanges.has(filePath);
-            this.deleteTrackedChange(filePath);
-            this.lineChanges.delete(filePath);
-            this.markLineChangesUpdated(filePath);
-            this.inlineViews.delete(filePath);
-            if (hadTracked) {
+            if (this.clearTrackedFileState(filePath)) {
                 this.emitTrackChangesEvent({ removedFiles: [filePath] });
             }
         }
+    }
+
+    private async processPendingExternalChangeEntry(filePath: string, entry: PendingExternalChange): Promise<void> {
+        if (!this.isRecording || !this.externalWatcherEnabled) {
+            return;
+        }
+
+        if (this.isPathIgnored(entry.uri)) {
+            return;
+        }
+
+        if (entry.operation === 'create') {
+            await this.processExternalFileCreated(filePath, entry.uri);
+            return;
+        }
+
+        if (entry.operation === 'delete') {
+            this.processExternalFileDeleted(filePath);
+            return;
+        }
+
+        await this.readFileAndUpdate(filePath, entry.uri);
+    }
+
+    private async flushPendingChangesForFile(filePath: string): Promise<void> {
+        const pendingChanges: Array<{ sequence: number; process: () => Promise<void> | void }> = [];
+
+        const documentEntry = this.pendingDocumentChangeEntries.get(filePath);
+        if (documentEntry) {
+            clearTimeout(documentEntry.timer);
+            this.pendingDocumentChangeEntries.delete(filePath);
+            pendingChanges.push({
+                sequence: documentEntry.sequence,
+                process: () => {
+                    if (this.isRecording) {
+                        this.processDocumentChange(documentEntry.document, documentEntry.content);
+                    }
+                }
+            });
+        }
+
+        const externalEntry = this.pendingExternalChangeEntries.get(filePath);
+        if (externalEntry) {
+            clearTimeout(externalEntry.timer);
+            this.pendingExternalChangeEntries.delete(filePath);
+            pendingChanges.push({
+                sequence: externalEntry.sequence,
+                process: () => this.processPendingExternalChangeEntry(filePath, externalEntry)
+            });
+        }
+
+        pendingChanges.sort((left, right) => left.sequence - right.sequence);
+        for (const pendingChange of pendingChanges) {
+            await pendingChange.process();
+        }
+    }
+
+    private async flushPendingChangesForFiles(filePaths: Iterable<string>): Promise<void> {
+        const uniqueFilePaths = [...new Set(filePaths)];
+        for (const filePath of uniqueFilePaths) {
+            await this.flushPendingChangesForFile(filePath);
+        }
+    }
+
+    private getTrackedAndPendingChangeFilePaths(): string[] {
+        return [...new Set([
+            ...this.trackedChanges.keys(),
+            ...this.pendingDocumentChangeEntries.keys(),
+            ...this.pendingExternalChangeEntries.keys()
+        ])];
     }
 
     private updateTrackedDiff(
@@ -1375,9 +1512,6 @@ export class DiffTracker {
         currentContent: string,
         options?: { baselineChanged?: boolean }
     ): void {
-        const hadTrackedChange = this.trackedChanges.has(filePath);
-        const hadLineChanges = this.lineChanges.has(filePath);
-        const hadInlineView = this.inlineViews.has(filePath);
         let originalContent = this.fileSnapshots.get(filePath);
         if (originalContent === undefined) {
             // Fallback baseline for unknown files
@@ -1394,12 +1528,7 @@ export class DiffTracker {
 
         // Ignore pure EOL-style / final-EOL toggles and track only logical line changes.
         if (sameLogicalLines) {
-            this.deleteTrackedChange(filePath);
-            this.lineChanges.delete(filePath);
-            this.markLineChangesUpdated(filePath);
-            this.inlineViews.delete(filePath);
-            const shouldNotify = hadTrackedChange || hadLineChanges || hadInlineView;
-            if (shouldNotify) {
+            if (this.clearTrackedFileState(filePath)) {
                 this.emitTrackChangesEvent({
                     removedFiles: [filePath],
                     baselineChanged: options?.baselineChanged ?? false
@@ -1438,27 +1567,12 @@ export class DiffTracker {
     }
 
     public async revertAllChanges(): Promise<number> {
-        const changes = Array.from(this.trackedChanges.values());
-        let revertedCount = 0;
-
-        for (const change of changes) {
-            const restored = await this.restoreFileToContent(
-                change.filePath,
-                change.originalContent,
-                { deleteIfMissingInBaseline: !this.baselineExistingFiles.has(change.filePath) }
-            );
-            if (restored) {
-                revertedCount++;
-            }
-        }
-
-        // Clear all tracked changes after reverting
-        this.clearDiffs();
-
-        return revertedCount;
+        return this.revertFiles(this.getTrackedAndPendingChangeFilePaths());
     }
 
     public async keepAllChanges(): Promise<number> {
+        await this.flushPendingChangesForFiles(this.getTrackedAndPendingChangeFilePaths());
+
         const changes = Array.from(this.trackedChanges.values());
         if (changes.length === 0) {
             return 0;
@@ -1466,9 +1580,7 @@ export class DiffTracker {
 
         let acceptedCount = 0;
         for (const change of changes) {
-            const doc = vscode.workspace.textDocuments.find(textDoc => textDoc.uri.fsPath === change.filePath);
-            const currentContent = doc?.getText() ?? change.currentContent;
-            this.fileSnapshots.set(change.filePath, currentContent);
+            this.fileSnapshots.set(change.filePath, change.currentContent);
             if (change.isDeleted) {
                 this.baselineExistingFiles.delete(change.filePath);
             } else {
@@ -1490,6 +1602,11 @@ export class DiffTracker {
     }
 
     public async revertFile(filePath: string): Promise<boolean> {
+        await this.flushPendingChangesForFile(filePath);
+        if (this.getDirtyOutOfSyncFiles([filePath]).length > 0) {
+            return false;
+        }
+
         const change = this.trackedChanges.get(filePath);
         if (!change) {
             return false;
@@ -1504,19 +1621,18 @@ export class DiffTracker {
             return false;
         }
 
-        this.deleteTrackedChange(filePath);
-        this.lineChanges.delete(filePath);
-        this.markLineChangesUpdated(filePath);
-        this.inlineViews.delete(filePath);
+        this.clearTrackedFileState(filePath);
         this.emitTrackChangesEvent({ removedFiles: [filePath] });
 
         return true;
     }
 
     public async revertFiles(filePaths: string[]): Promise<number> {
+        await this.flushPendingChangesForFiles(filePaths);
+        const blockedFiles = new Set(this.getDirtyOutOfSyncFiles(filePaths));
         const changes = filePaths
             .map(filePath => this.trackedChanges.get(filePath))
-            .filter((change): change is FileDiff => change !== undefined);
+            .filter((change): change is FileDiff => change !== undefined && !blockedFiles.has(change.filePath));
         if (changes.length === 0) {
             return 0;
         }
@@ -1532,10 +1648,7 @@ export class DiffTracker {
                 continue;
             }
 
-            this.deleteTrackedChange(change.filePath);
-            this.lineChanges.delete(change.filePath);
-            this.markLineChangesUpdated(change.filePath);
-            this.inlineViews.delete(change.filePath);
+            this.clearTrackedFileState(change.filePath);
             removedFiles.push(change.filePath);
         }
 
@@ -1623,6 +1736,61 @@ export class DiffTracker {
         return this.trackedChangesCache.slice();
     }
 
+    public getTrackedChange(filePath: string): FileDiff | undefined {
+        return this.trackedChanges.get(filePath);
+    }
+
+    public async getTrackedChangesAfterFlush(): Promise<FileDiff[]> {
+        await this.flushPendingChangesForFiles(this.getTrackedAndPendingChangeFilePaths());
+        return this.getTrackedChanges();
+    }
+
+    public isDocumentOutOfSyncWithTrackedChange(document: vscode.TextDocument): boolean {
+        if (document.uri.scheme !== 'file') {
+            return false;
+        }
+
+        if (!document.isDirty) {
+            return false;
+        }
+
+        const trackedChange = this.trackedChanges.get(document.uri.fsPath);
+        return trackedChange !== undefined && trackedChange.currentContent !== document.getText();
+    }
+
+    public getDirtyOutOfSyncFiles(filePaths: Iterable<string>): string[] {
+        const targets = new Set(filePaths);
+        if (targets.size === 0) {
+            return [];
+        }
+
+        const blockedFiles: string[] = [];
+        const seen = new Set<string>();
+        for (const document of vscode.workspace.textDocuments) {
+            if (document.uri.scheme !== 'file') {
+                continue;
+            }
+
+            const filePath = document.uri.fsPath;
+            if (!targets.has(filePath) || seen.has(filePath)) {
+                continue;
+            }
+
+            if (this.isDocumentOutOfSyncWithTrackedChange(document)) {
+                blockedFiles.push(filePath);
+                seen.add(filePath);
+            }
+        }
+
+        return blockedFiles;
+    }
+
+    public async getDirtyOutOfSyncFilesAfterFlush(filePaths: Iterable<string>): Promise<string[]> {
+        const targets = [...new Set(filePaths)];
+        await this.flushPendingChangesForFiles(targets);
+        return this.getDirtyOutOfSyncFiles(targets);
+    }
+
     public getLineChanges(filePath: string): LineChange[] | undefined {
         return this.lineChanges.get(filePath);
     }
@@ -1655,9 +1823,15 @@ export class DiffTracker {
      * Revert a specific change block to its original content
      */
     public async revertBlock(filePath: string, blockRef: string | number): Promise<boolean> {
+        await this.flushPendingChangesForFile(filePath);
+        if (this.getDirtyOutOfSyncFiles([filePath]).length > 0) {
+            return false;
+        }
+
+        const tracked = this.trackedChanges.get(filePath);
         const originalContent = this.fileSnapshots.get(filePath);
 
-        if (originalContent === undefined) {
+        if (originalContent === undefined || !tracked) {
             return false;
         }
 
@@ -1669,7 +1843,7 @@ export class DiffTracker {
         try {
             const uri = vscode.Uri.file(filePath);
             const doc = await vscode.workspace.openTextDocument(uri);
-            const currentModel = this.toTextLineModel(doc.getText());
+            const currentModel = this.toTextLineModel(tracked.currentContent);
             const originalModel = this.toTextLineModel(originalContent);
             const nextLines = [...currentModel.lines];
             const startIdx = Math.max(0, block.startLine - 1);
@@ -1697,7 +1871,7 @@ export class DiffTracker {
                 currentModel.dominantEol
             );
 
-            if (nextText === doc.getText()) {
+            if (nextText === tracked.currentContent) {
                 return true;
             }
 
@@ -1724,13 +1898,16 @@ export class DiffTracker {
      * Updates the snapshot so this block's changes become the new baseline
      */
     public async keepBlock(filePath: string, blockRef: string | number): Promise<boolean> {
+        await this.flushPendingChangesForFile(filePath);
+
         const block = this.resolveBlock(filePath, blockRef);
         if (!block) {
             return false;
         }
+
+        const tracked = this.trackedChanges.get(filePath);
         const originalContent = this.fileSnapshots.get(filePath);
-        const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === filePath);
-        const currentText = doc?.getText() ?? this.trackedChanges.get(filePath)?.currentContent;
+        const currentText = tracked?.currentContent;
 
         if (originalContent === undefined || currentText === undefined) {
             return false;
@@ -1799,34 +1976,22 @@ export class DiffTracker {
      * Updates the snapshot to match current document content
      */
     public async keepAllChangesInFile(filePath: string): Promise<boolean> {
-        const tracked = this.trackedChanges.get(filePath);
-        let currentContent = tracked?.currentContent;
+        await this.flushPendingChangesForFile(filePath);
 
-        if (currentContent === undefined) {
-            let doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === filePath);
-            if (!doc) {
-                try {
-                    doc = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
-                } catch {
-                    return false;
-                }
-            }
-            currentContent = doc.getText();
+        const tracked = this.trackedChanges.get(filePath);
+        if (!tracked) {
+            return false;
         }
 
         // Update snapshot to current content
-        this.fileSnapshots.set(filePath, currentContent);
-        if (tracked?.isDeleted) {
+        this.fileSnapshots.set(filePath, tracked.currentContent);
+        if (tracked.isDeleted) {
             this.baselineExistingFiles.delete(filePath);
         } else {
             this.baselineExistingFiles.add(filePath);
         }
 
-        // Clear tracked changes for this file
-        this.deleteTrackedChange(filePath);
-        this.lineChanges.delete(filePath);
-        this.markLineChangesUpdated(filePath);
-        this.inlineViews.delete(filePath);
+        this.clearTrackedFileState(filePath);
 
         this.emitTrackChangesEvent({
             removedFiles: [filePath],
@@ -1837,6 +2002,8 @@ export class DiffTracker {
     }
 
     public async keepFiles(filePaths: string[]): Promise<number> {
+        await this.flushPendingChangesForFiles(filePaths);
+
         const changes = filePaths
             .map(filePath => this.trackedChanges.get(filePath))
             .filter((change): change is FileDiff => change !== undefined);
@@ -1846,19 +2013,14 @@ export class DiffTracker {
 
         const removedFiles: string[] = [];
         for (const change of changes) {
-            const doc = vscode.workspace.textDocuments.find(textDoc => textDoc.uri.fsPath === change.filePath);
-            const currentContent = doc?.getText() ?? change.currentContent;
-            this.fileSnapshots.set(change.filePath, currentContent);
+            this.fileSnapshots.set(change.filePath, change.currentContent);
             if (change.isDeleted) {
                 this.baselineExistingFiles.delete(change.filePath);
             } else {
                 this.baselineExistingFiles.add(change.filePath);
             }
 
-            this.deleteTrackedChange(change.filePath);
-            this.lineChanges.delete(change.filePath);
-            this.markLineChangesUpdated(change.filePath);
-            this.inlineViews.delete(change.filePath);
+            this.clearTrackedFileState(change.filePath);
             removedFiles.push(change.filePath);
         }
 
@@ -2146,23 +2308,36 @@ export class DiffTracker {
             }
         }
 
-        const existingTimer = this.documentChangeTimers.get(filePath);
-        if (existingTimer) {
-            clearTimeout(existingTimer);
+        const existingEntry = this.pendingDocumentChangeEntries.get(filePath);
+        if (existingEntry) {
+            clearTimeout(existingEntry.timer);
         }
 
+        const sequence = this.nextPendingChangeSequence++;
+        const content = doc.getText();
+        let pendingChange!: PendingDocumentChange;
         const timer = setTimeout(() => {
-            this.documentChangeTimers.delete(filePath);
+            if (this.pendingDocumentChangeEntries.get(filePath) !== pendingChange) {
+                return;
+            }
+
+            this.pendingDocumentChangeEntries.delete(filePath);
             if (!this.isRecording) {
                 return;
             }
-            this.processDocumentChange(doc);
+            this.processDocumentChange(doc, content);
         }, 120);
 
-        this.documentChangeTimers.set(filePath, timer);
+        pendingChange = {
+            timer,
+            sequence,
+            document: doc,
+            content
+        };
+        this.pendingDocumentChangeEntries.set(filePath, pendingChange);
     }
 
-    private processDocumentChange(doc: vscode.TextDocument): void {
+    private processDocumentChange(doc: vscode.TextDocument, currentContent = doc.getText()): void {
         if (!this.isRecording) {
             return;
         }
@@ -2177,7 +2352,6 @@ export class DiffTracker {
             return;
         }
 
-        const currentContent = doc.getText();
         this.updateTrackedDiff(filePath, currentContent);
     }
 
@@ -2199,13 +2373,7 @@ export class DiffTracker {
     }
 
     private getCurrentContent(filePath: string): string | undefined {
-        const tracked = this.trackedChanges.get(filePath);
-        if (tracked) {
-            return tracked.currentContent;
-        }
-
-        const doc = vscode.workspace.textDocuments.find(textDoc => textDoc.uri.fsPath === filePath);
-        return doc?.getText();
+        return this.trackedChanges.get(filePath)?.currentContent;
     }
 
     private ensureSnapshotForDocument(doc: vscode.TextDocument): void {
@@ -3083,6 +3251,23 @@ export class DiffTracker {
         }
     }
 
+    private hasTrackedFileState(filePath: string): boolean {
+        return this.trackedChanges.has(filePath) ||
+            this.lineChanges.has(filePath) ||
+            this.inlineViews.has(filePath);
+    }
+
+    private clearTrackedFileState(filePath: string): boolean {
+        const hadState = this.hasTrackedFileState(filePath);
+
+        this.deleteTrackedChange(filePath);
+        this.lineChanges.delete(filePath);
+        this.markLineChangesUpdated(filePath);
+        this.inlineViews.delete(filePath);
+
+        return hadState;
+    }
+
     private clearTrackedChanges(): void {
         if (this.trackedChanges.size === 0) {
             return;
@@ -3152,7 +3337,6 @@ export class DiffTracker {
         }
         this.clearExternalChangeTimers();
         this.clearDocumentChangeTimers();
-        this.clearWatcherSuppressionTimers();
         this.clearAutomationSessions();
         this.disposeFileWatchers();
         this.disposables.forEach(d => d.dispose());

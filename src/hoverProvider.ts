@@ -13,6 +13,10 @@ export class DiffHoverProvider implements vscode.HoverProvider {
             return null;
         }
 
+        if (document.uri.scheme !== 'file' || this.diffTracker.isDocumentOutOfSyncWithTrackedChange(document)) {
+            return null;
+        }
+
         const filePath = document.uri.fsPath;
         const lineChanges = this.diffTracker.getLineChanges(filePath);
 

@@ -2,7 +2,7 @@
   "name": "diff-tracker",
   "displayName": "Diff Tracker",
   "description": "Visual file diff tracking - record and display changes in real-time",
-  "version": "0.6.7",
+  "version": "0.6.10",
   "publisher": "virtushda",
   "author": "virtushda (fork from TinyTigerPan (Fork from Wizyoung))",
   "icon": "resources/marketplace-icon.png",
@@ -99,6 +99,11 @@
           "default": false,
           "description": "When opening Webview diff, place it in a side editor group instead of the current one"
         },
+        "diffTracker.webviewDefaultSplit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open newly created Webview diff panels in Split mode instead of Unified mode"
+        },
         "diffTracker.showFullFilePaths": {
           "type": "boolean",
           "default": false,
@@ -172,7 +177,7 @@
         "diffTracker.onlyTrackAutomatedChanges": {
           "type": "boolean",
           "default": false,
-          "description": "Only track automated changes. Manual typing in VS Code is ignored; external tool edits and tagged agent/extension edits are still recorded."
+          "description": "Only track automation-style changes. Unsaved manual typing in VS Code is ignored; saved editor changes, external tool edits, and tagged agent/extension edits are recorded."
         }
       }
     },

@@ -117,6 +117,7 @@ npm run package
 | `diffTracker.highlightWordChanges` | `true` | 是否高亮修改行中的词级差异 |
 | `diffTracker.defaultOpenMode` | `webview` | 点击变更文件时的默认打开方式 |
 | `diffTracker.openWebviewBeside` | `false` | 是否将 WebView Diff 打开到旁边的编辑器分组 |
+| `diffTracker.webviewDefaultSplit` | `true` | 是否将新创建的 WebView Diff 面板默认打开为分栏模式 |
 | `diffTracker.useGitIgnoreExcludes` | `true` | 是否应用来自 `.gitignore` 与 `.git/info/exclude` 的忽略规则 |
 | `diffTracker.useBuiltInExcludes` | `true` | 是否应用内置忽略规则，例如 `.git`、`node_modules`、`dist`、`coverage` |
 | `diffTracker.useVSCodeFilesExcludes` | `true` | 是否应用来自 `files.exclude` 的 VS Code Explorer 排除设置 |
@@ -136,6 +137,8 @@ npm run package
 - `sideBySide`：打开 VS Code 原生左右对比
 - `original`：直接打开原始文件
 - `splitOriginalWebview`：左侧原始文件，右侧 WebView Diff
+
+当 `diffTracker.webviewDefaultSplit` 为 `false` 时，新创建的 WebView Diff 面板会默认使用统一视图。工具栏切换只影响当前已打开的面板。
 
 ## 仅跟踪自动化改动
 

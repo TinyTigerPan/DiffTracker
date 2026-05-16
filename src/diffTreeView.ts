@@ -4,6 +4,7 @@ import { DiffTracker, FileDiff } from './diffTracker';
 
 interface DirNode {
     name: string;
+    absolutePath?: string;
     childrenDirs: Map<string, DirNode>;
     files: FileDiff[];
 }
@@ -193,6 +194,7 @@ export class DiffTreeDataProvider implements vscode.TreeDataProvider<TreeItem>, 
             if (!next) {
                 next = {
                     name: dirName,
+                    absolutePath: this.getAbsoluteDirPath(fileDiff.filePath, parts, i),
                     childrenDirs: new Map<string, DirNode>(),
                     files: []
                 };
@@ -202,6 +204,28 @@ export class DiffTreeDataProvider implements vscode.TreeDataProvider<TreeItem>, 
         }
 
         current.files.push(fileDiff);
+    }
+
+    private getAbsoluteDirPath(filePath: string, displayParts: string[], dirIndex: number): string | undefined {
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath));
+        if (!workspaceFolder) {
+            return undefined;
+        }
+
+        const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
+        const relativeParts = path.relative(workspaceFolder.uri.fsPath, filePath)
+            .split(path.sep)
+            .filter(Boolean);
+
+        if (workspaceFolders.length > 1) {
+            if (dirIndex === 0 && displayParts[0] === workspaceFolder.name) {
+                return workspaceFolder.uri.fsPath;
+            }
+
+            return path.join(workspaceFolder.uri.fsPath, ...relativeParts.slice(0, dirIndex));
+        }
+
+        return path.join(workspaceFolder.uri.fsPath, ...relativeParts.slice(0, dirIndex + 1));
     }
 
     private buildTreeItemsFromNode(node: DirNode, isRoot = false): TreeItem[] {
@@ -218,6 +242,7 @@ export class DiffTreeDataProvider implements vscode.TreeDataProvider<TreeItem>, 
             dirItem.iconPath = new vscode.ThemeIcon('folder');
             dirItem.children = this.buildTreeItemsFromNode(childNode);
             dirItem.folderFilePaths = this.getFilePathsInNode(childNode);
+            dirItem.folderPath = childNode.absolutePath;
             dirItem.description = `${dirItem.folderFilePaths.length} file(s)`;
             dirItem.contextValue = 'changedFolder';
             items.push(dirItem);
@@ -250,6 +275,7 @@ class TreeItem extends vscode.TreeItem {
     public children?: TreeItem[];
     public filePath?: string;
     public folderFilePaths?: string[];
+    public folderPath?: string;
     public isDeleted?: boolean;
 
     constructor(

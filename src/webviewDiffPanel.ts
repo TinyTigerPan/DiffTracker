@@ -36,7 +36,7 @@ export class WebviewDiffPanel {
     private readonly extensionUri: vscode.Uri;
     private disposables: vscode.Disposable[] = [];
     private filePath: string = '';
-    private currentStyle: 'split' | 'unified' = 'split';
+    private currentStyle: 'split' | 'unified';
     private currentWrap: boolean = false;
     private currentExpandAll: boolean = false;
     private isInitialized: boolean = false;
@@ -48,6 +48,7 @@ export class WebviewDiffPanel {
     ) {
         this.panel = panel;
         this.extensionUri = extensionUri;
+        this.currentStyle = WebviewDiffPanel.getDefaultStyle();
 
         // Listen for panel disposal
         this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
@@ -140,6 +141,11 @@ export class WebviewDiffPanel {
         return vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.One;
     }
 
+    private static getDefaultStyle(): 'split' | 'unified' {
+        const defaultSplit = vscode.workspace.getConfiguration('diffTracker').get<boolean>('webviewDefaultSplit', true);
+        return defaultSplit ? 'split' : 'unified';
+    }
+
     public update(filePath: string): void {
         this.filePath = filePath;
         const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || 'file';
@@ -161,12 +167,7 @@ export class WebviewDiffPanel {
             fileChange?.originalContent ??
             this.diffTracker.getOriginalContent(this.filePath) ??
             '';
-        // Try to get current content from: tracked changes > open document > original
-        let currentContent = fileChange?.currentContent;
-        if (currentContent === undefined) {
-            const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === this.filePath);
-            currentContent = doc?.getText() ?? originalContent;
-        }
+        const currentContent = fileChange?.currentContent ?? originalContent;
         const logicalOriginalContent = this.toLogicalDiffContent(originalContent);
         const logicalCurrentContent = this.toLogicalDiffContent(currentContent);
         const changeBlocks = this.diffTracker.getChangeBlocks(this.filePath).map(block => this.serializeChangeBlock(block));

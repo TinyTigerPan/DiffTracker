@@ -13,7 +13,7 @@ Diff Tracker is a VS Code extension that records file changes and provides three
 
 ## Screenshots
 
-**Highlights in 0.6.7: WebView diff overview ruler for faster change navigation.**
+**Highlights in 0.6.10: Documentation and release metadata refresh.**
 
 | Cursor like WebView Unified | Cursor like WebView Split |
 |:---------------:|:--------------:|
@@ -31,6 +31,8 @@ Diff Tracker is a VS Code extension that records file changes and provides three
 ## Features
 - [New 🚀] Pending, unaccepted changes survive VS Code restarts and are restored from the saved baseline
 - [New 🚀] Automation-only tracking mode for AI/agent or extension-driven edits
+- [New 🚀] Block revert actions when unsaved editor content no longer matches the tracked diff
+- [New 🚀] Hide stale CodeLens, hovers, and inline decorations until dirty editors are saved, reverted, or reloaded
 - [New 🚀] Configurable WebView opening position (`current group` or `beside`)
 - [New 🚀] WebView diff overview ruler with clickable change markers and a live viewport indicator
 - [New 🚀] Automatically start recording file changes after the extension is activated
@@ -107,6 +109,7 @@ This extension provides the following settings:
 | `diffTracker.highlightModifiedLines` | `true` | Highlight modified lines with blue background |
 | `diffTracker.highlightWordChanges` | `true` | Highlight word-level changes within modified lines |
 | `diffTracker.openWebviewBeside` | `false` | Open Webview diff in a side editor group instead of the current editor group |
+| `diffTracker.webviewDefaultSplit` | `true` | Open newly created Webview diff panels in Split mode instead of Unified mode |
 | `diffTracker.showFullFilePaths` | `false` | Show project-relative file paths in the Change Recording tree instead of only the file name |
 | `diffTracker.showFolders` | `true` | Show folders in the Change Recording tree |
 | `diffTracker.confirmReversions` | `true` | Show a confirmation dialog before reverting all changes or reverting all changes in a file |
@@ -120,7 +123,7 @@ This extension provides the following settings:
 | `diffTracker.useVSCodeWatcherExcludes` | `false` | Apply VS Code watcher exclude settings from `files.watcherExclude`. Conditional object rules are ignored. |
 | `diffTracker.watchExclude` | `[]` | Additional watch ignore patterns (`.gitignore` style) |
 | `diffTracker.onlyTrackVSCodeChanges` | `false` | Deprecated alias for automation-only tracking |
-| `diffTracker.onlyTrackAutomatedChanges` | `false` | Ignore manual typing in VS Code. External CLI/tool edits are still tracked, and VS Code extension edits can be tracked when they open an automation session first |
+| `diffTracker.onlyTrackAutomatedChanges` | `false` | Ignore unsaved manual typing in VS Code. Saved editor changes, external CLI/tool edits, and tagged extension edits are tracked |
 
 You can toggle display/highlight/ignore settings in the sidebar **Settings** panel, and edit watch ignore patterns via **Edit Watch Ignores**.
 
@@ -130,8 +133,11 @@ VS Code exclude inheritance is split across `files.exclude`, `search.exclude`, a
 
 When `diffTracker.openWebviewBeside` is enabled, Webview diff opens in a side editor group. By default it opens in the current editor group.
 
+When `diffTracker.webviewDefaultSplit` is disabled, newly created Webview diff panels open in Unified mode. Toolbar changes remain local to the currently open panel.
+
 When `diffTracker.onlyTrackAutomatedChanges` is enabled:
-- Manual typing in the editor is ignored
+- Unsaved manual typing in the editor is ignored
+- Saved editor changes are tracked through the save/watch paths
 - External tools/CLI that modify files on disk are still tracked through file watchers
 - VS Code extensions should call `diffTracker.beginAutomationSession` before applying edits, and `diffTracker.endAutomationSession` after they finish
 
@@ -156,6 +162,11 @@ try {
 - If you find a reproducible diff/render edge case, please open an issue with a minimal file sample.
 
 ## Release Notes
+
+### 0.6.10
+
+- Bump extension version to `0.6.10`
+- Refresh README release metadata and latest-version highlight
 
 ### 0.1.0
 
@@ -255,6 +266,16 @@ try {
 - Add a WebView diff overview ruler beside the diff content
 - Show clickable change markers for added, deleted, and modified blocks
 - Track the visible scroll viewport in the overview ruler to speed up navigation through large diffs
+
+### 0.6.8
+- Fix Vibe Coding Only missing saved Codex/VS Code agent edits by tracking saved editor changes without suppressing watcher events
+- Preserve pre-save baselines for files first seen through saved editor changes
+- Prevent baseline initialization from overwriting a snapshot captured during a concurrent save
+
+### 0.6.9
+- Prevent whole-file, folder, and block revert actions from running when unsaved editor content no longer matches the tracked diff
+- Hide stale CodeLens, hover details, and inline decorations for dirty out-of-sync editors
+- Resolve folder-level accept/revert actions from the current tracked files under that folder
 
 ## License
 

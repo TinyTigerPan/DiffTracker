@@ -92,6 +92,11 @@ export class DecorationManager {
         }
 
         const filePath = editor.document.uri.fsPath;
+        if (this.diffTracker.isDocumentOutOfSyncWithTrackedChange(editor.document)) {
+            this.clearDecorations(editor);
+            return;
+        }
+
         const lineChanges = this.diffTracker.getLineChanges(filePath);
 
         if (!lineChanges) {
